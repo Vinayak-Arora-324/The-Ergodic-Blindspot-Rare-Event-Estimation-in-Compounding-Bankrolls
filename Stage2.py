@@ -1,4 +1,5 @@
 """
+Sample Changes
 STAGE 2 - Does the tail hedge compound or bleed, and does the ANSWER depend on the estimator?
 
 Target quantity (the ergodic object):
