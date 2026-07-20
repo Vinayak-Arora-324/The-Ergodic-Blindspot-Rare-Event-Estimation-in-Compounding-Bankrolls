@@ -1,0 +1,327 @@
+(* Content-type: application/vnd.wolfram.mathematica *)
+
+(*** Wolfram Notebook File ***)
+(* http://www.wolfram.com/nb *)
+
+(* CreatedBy='Wolfram 15.0' *)
+
+(*CacheID: 234*)
+(* Internal cache information:
+NotebookFileLineBreakTest
+NotebookFileLineBreakTest
+NotebookDataPosition[       154,          7]
+NotebookDataLength[     11053,        319]
+NotebookOptionsPosition[     10699,        305]
+NotebookOutlinePosition[     11093,        321]
+CellTagsIndexPosition[     11050,        318]
+WindowFrame->Normal*)
+
+(* Beginning of Notebook Content *)
+Notebook[{
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"(*", 
+   RowBox[{"Part", " ", "one"}], "*)"}], "\[IndentingNewLine]", 
+  RowBox[{"(*", 
+   RowBox[{
+    RowBox[{"Log", " ", "return"}], ",", " ", 
+    RowBox[{
+    "assuming", " ", "a", " ", "fat", " ", "tailed", " ", "distribution"}]}], 
+   "*)"}], "\[IndentingNewLine]", 
+  RowBox[{"(*", 
+   RowBox[{"Ensure", " ", "reproducibility"}], "*)"}], "\[IndentingNewLine]", 
+  
+  RowBox[{
+   RowBox[{
+    RowBox[{"SeedRandom", "[", "0", "]"}], ";"}], "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"s0", "=", "100.0"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"nu", "=", "3.0"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"sigma", "=", "0.05"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"tScale", "=", 
+     RowBox[{"sigma", "/", 
+      RowBox[{"Sqrt", "[", 
+       RowBox[{"nu", "/", 
+        RowBox[{"(", 
+         RowBox[{"nu", "-", "2.0"}], ")"}]}], "]"}]}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"mu", "=", "0.0"}], ";"}], "\[IndentingNewLine]", 
+   RowBox[{"(*", 
+    RowBox[{"Define", " ", "the", " ", "return", " ", "distribution"}], 
+    "*)"}], "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"dist", "=", 
+     RowBox[{"StudentTDistribution", "[", 
+      RowBox[{"mu", ",", "tScale", ",", "nu"}], "]"}]}], ";"}], "\n", 
+   RowBox[{"(*", 
+    RowBox[{
+     RowBox[{"--", 
+      RowBox[{"--", 
+       RowBox[{"Hedge", ":", 
+        RowBox[{"deep", " ", "OTM", " ", "put"}]}]}]}], ",", 
+     RowBox[{"only", " ", "pays", " ", "in", " ", "a", " ", 
+      RowBox[{
+       RowBox[{"crash", "--"}], "--"}]}]}], "*)"}], "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"k", "=", "55.0"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{
+     RowBox[{"putPayoff", "[", "r_", "]"}], ":=", 
+     RowBox[{"Max", "[", 
+      RowBox[{
+       RowBox[{"k", "-", 
+        RowBox[{"s0", "*", 
+         RowBox[{"Exp", "[", "r", "]"}]}]}], ",", "0.0"}], "]"}]}], ";"}], 
+   "\[IndentingNewLine]", 
+   RowBox[{"(*", 
+    RowBox[{
+     RowBox[{"--", 
+      RowBox[{"--", "Ground"}]}], " ", "truth", " ", "via", " ", "numerical", 
+     " ", 
+     RowBox[{
+      RowBox[{"integration", "--"}], "--"}]}], "*)"}], "\n", 
+   RowBox[{
+    RowBox[{"trueVal", "=", 
+     RowBox[{"NIntegrate", "[", 
+      RowBox[{
+       RowBox[{
+        RowBox[{"putPayoff", "[", "r", "]"}], "*", 
+        RowBox[{"PDF", "[", 
+         RowBox[{"dist", ",", "r"}], "]"}]}], ",", 
+       RowBox[{"{", 
+        RowBox[{"r", ",", 
+         RowBox[{"-", "6.0"}], ",", "6.0"}], "}"}], ",", 
+       RowBox[{"Method", "->", "\"\<LocalAdaptive\>\""}]}], "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"rStar", "=", 
+     RowBox[{"Log", "[", 
+      RowBox[{"k", "/", "s0"}], "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"pCrash", "=", 
+     RowBox[{"CDF", "[", 
+      RowBox[{"dist", ",", "rStar"}], "]"}]}], ";"}], "\[IndentingNewLine]", 
+   RowBox[{"(*", 
+    RowBox[{
+     RowBox[{
+      RowBox[{"--", 
+       RowBox[{"--", "Crude"}]}], " ", "MC", " ", "at", " ", "an", " ", 
+      "affordable", " ", "N"}], ",", 
+     RowBox[{"compiled", " ", "for", " ", 
+      RowBox[{
+       RowBox[{"speed", "--"}], "--"}]}]}], "*)"}], "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"nAfford", "=", "5000"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"trials", "=", "3000"}], ";"}], "\n", 
+   RowBox[{"(*", 
+    RowBox[{
+    "Compile", " ", "the", " ", "sampling", " ", "and", " ", "expectation", " ",
+      "loop", " ", "for", " ", "speed"}], "*)"}], "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"mcTrials", "=", 
+     RowBox[{
+      RowBox[{"Compile", "[", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{
+          RowBox[{"{", 
+           RowBox[{"n", ",", "_Integer"}], "}"}], ",", 
+          RowBox[{"{", 
+           RowBox[{"numTrials", ",", "_Integer"}], "}"}], ",", 
+          RowBox[{"{", 
+           RowBox[{"scale", ",", "_Real"}], "}"}], ",", 
+          RowBox[{"{", 
+           RowBox[{"degFree", ",", "_Real"}], "}"}]}], "}"}], ",", 
+        RowBox[{"Table", "[", 
+         RowBox[{
+          RowBox[{"Mean", "[", 
+           RowBox[{"Map", "[", 
+            RowBox[{
+             RowBox[{
+              RowBox[{"Max", "[", 
+               RowBox[{
+                RowBox[{"55.0", "-", 
+                 RowBox[{"100.0", "*", 
+                  RowBox[{"Exp", "[", "#", "]"}]}]}], ",", "0.0"}], "]"}], 
+              "&"}], ",", 
+             RowBox[{"RandomVariate", "[", 
+              RowBox[{
+               RowBox[{"StudentTDistribution", "[", 
+                RowBox[{"0.0", ",", "scale", ",", "degFree"}], "]"}], ",", 
+               "n"}], "]"}]}], "]"}], "]"}], ",", 
+          RowBox[{"{", "numTrials", "}"}]}], "]"}], ",", 
+        RowBox[{"RuntimeOptions", "->", "\"\<Speed\>\""}]}], "]"}], "[", 
+      RowBox[{"nAfford", ",", "trials", ",", "tScale", ",", "nu"}], "]"}]}], 
+    ";"}], "\[IndentingNewLine]", "\n", 
+   RowBox[{"(*", 
+    RowBox[{
+     RowBox[{"--", 
+      RowBox[{"--", "Compute"}]}], " ", 
+     RowBox[{
+      RowBox[{"statistics", "--"}], "--"}]}], "*)"}], "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"meanEst", "=", 
+     RowBox[{"Mean", "[", "mcTrials", "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"medianEst", "=", 
+     RowBox[{"Median", "[", "mcTrials", "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"stdEst", "=", 
+     RowBox[{"StandardDeviation", "[", "mcTrials", "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"cvEst", "=", 
+     RowBox[{"stdEst", "/", "meanEst"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"fracUnderHalf", "=", 
+     RowBox[{
+      RowBox[{"Count", "[", 
+       RowBox[{"mcTrials", ",", 
+        RowBox[{"x_", "/;", 
+         RowBox[{"x", "<", 
+          RowBox[{"0.5", "*", "trueVal"}]}]}]}], "]"}], "/", "trials"}]}], 
+    ";"}], "\n", 
+   RowBox[{
+    RowBox[{"fracZero", "=", 
+     RowBox[{
+      RowBox[{"Count", "[", 
+       RowBox[{"mcTrials", ",", "0.0"}], "]"}], "/", "trials"}]}], ";"}], 
+   "\[IndentingNewLine]", "\n", 
+   RowBox[{"(*", 
+    RowBox[{"Sample", " ", "5", " ", "individual", " ", "runs"}], "*)"}], "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"fiveRuns", "=", 
+     RowBox[{"Table", "[", 
+      RowBox[{
+       RowBox[{"Mean", "[", 
+        RowBox[{
+         RowBox[{
+          RowBox[{"Max", "[", 
+           RowBox[{
+            RowBox[{"k", "-", 
+             RowBox[{"s0", "*", 
+              RowBox[{"Exp", "[", "#", "]"}]}]}], ",", "0.0"}], "]"}], "&"}], 
+         "/@", 
+         RowBox[{"RandomVariate", "[", 
+          RowBox[{"dist", ",", "nAfford"}], "]"}]}], "]"}], ",", 
+       RowBox[{"{", "5", "}"}]}], "]"}]}], ";"}], "\[IndentingNewLine]", "\n", 
+   RowBox[{"(*", 
+    RowBox[{
+     RowBox[{"--", 
+      RowBox[{"--", "Print"}]}], " ", 
+     RowBox[{
+      RowBox[{"Results", "--"}], "--"}]}], "*)"}], "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{"StringForm", "[", 
+      RowBox[{"\"\<crash prob (put ITM)      : `` (~`` crashes per run)\>\"", 
+       ",", 
+       RowBox[{"ScientificForm", "[", 
+        RowBox[{"pCrash", ",", "3"}], "]"}], ",", 
+       RowBox[{"NumberForm", "[", 
+        RowBox[{
+         RowBox[{"nAfford", "*", "pCrash"}], ",", 
+         RowBox[{"{", 
+          RowBox[{"4", ",", "1"}], "}"}]}], "]"}]}], "]"}], "]"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{"StringForm", "[", 
+      RowBox[{"\"\<TRUE E[payoff] (quad)     : ``\>\"", ",", 
+       RowBox[{"NumberForm", "[", 
+        RowBox[{"trueVal", ",", 
+         RowBox[{"{", 
+          RowBox[{"6", ",", "5"}], "}"}]}], "]"}]}], "]"}], "]"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{"StringForm", "[", 
+      RowBox[{"\"\<crude MC  mean of estimates: ``   <- ~unbiased in \
+expectation\>\"", ",", 
+       RowBox[{"NumberForm", "[", 
+        RowBox[{"meanEst", ",", 
+         RowBox[{"{", 
+          RowBox[{"6", ",", "5"}], "}"}]}], "]"}]}], "]"}], "]"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{"StringForm", "[", 
+      RowBox[{"\"\<crude MC  MEDIAN estimate  : ``   <- the TYPICAL run\>\"", 
+       ",", 
+       RowBox[{"NumberForm", "[", 
+        RowBox[{"medianEst", ",", 
+         RowBox[{"{", 
+          RowBox[{"6", ",", "5"}], "}"}]}], "]"}]}], "]"}], "]"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{"StringForm", "[", 
+      RowBox[{"\"\<          std of estimates : ``\>\"", ",", 
+       RowBox[{"NumberForm", "[", 
+        RowBox[{"stdEst", ",", 
+         RowBox[{"{", 
+          RowBox[{"6", ",", "5"}], "}"}]}], "]"}]}], "]"}], "]"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{"StringForm", "[", 
+      RowBox[{"\"\<          coeff of variation: ``\>\"", ",", 
+       RowBox[{"NumberForm", "[", 
+        RowBox[{"cvEst", ",", 
+         RowBox[{"{", 
+          RowBox[{"3", ",", "2"}], "}"}]}], "]"}]}], "]"}], "]"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{"StringForm", "[", 
+      RowBox[{"\"\<frac of runs < 50% of true : ``%\>\"", ",", 
+       RowBox[{"NumberForm", "[", 
+        RowBox[{
+         RowBox[{"fracUnderHalf", "*", "100"}], ",", 
+         RowBox[{"{", 
+          RowBox[{"4", ",", "2"}], "}"}]}], "]"}]}], "]"}], "]"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{"StringForm", "[", 
+      RowBox[{"\"\<frac of runs that saw 0    : ``%\>\"", ",", 
+       RowBox[{"NumberForm", "[", 
+        RowBox[{
+         RowBox[{"fracZero", "*", "100"}], ",", 
+         RowBox[{"{", 
+          RowBox[{"4", ",", "2"}], "}"}]}], "]"}]}], "]"}], "]"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{"\"\<five individual affordable runs: \>\"", ",", 
+      RowBox[{"Map", "[", 
+       RowBox[{
+        RowBox[{
+         RowBox[{"ToString", "[", 
+          RowBox[{"NumberForm", "[", 
+           RowBox[{"#", ",", 
+            RowBox[{"{", 
+             RowBox[{"5", ",", "4"}], "}"}]}], "]"}], "]"}], "&"}], ",", 
+        "fiveRuns"}], "]"}]}], "]"}], ";"}], 
+   "\[IndentingNewLine]"}]}]], "Input",
+ CellChangeTimes->{{3.9935362941336718`*^9, 3.993536301430695*^9}, {
+  3.9935364934328423`*^9, 3.993536528368178*^9}, {3.993536634153273*^9, 
+  3.993536670938878*^9}},ExpressionUUID->"7d8df112-179c-4cc4-a5f7-\
+e2df1b8d8317"]
+},
+WindowSize->{1131.75, 645.75},
+WindowMargins->{{0, Automatic}, {Automatic, 0}},
+FrontEndVersion->"15.0 for Linux x86 (64-bit) (May 19, 2026)",
+StyleDefinitions->"Default.nb",
+ExpressionUUID->"2222c525-df3e-441a-aad9-64164e807573"
+]
+(* End of Notebook Content *)
+
+(* Internal cache information *)
+(*CellTagsOutline
+CellTagsIndex->{}
+*)
+(*CellTagsIndex
+CellTagsIndex->{}
+*)
+(*NotebookFileOutline
+Notebook[{
+Cell[554, 20, 10141, 283, 1011, "Input",ExpressionUUID->"7d8df112-179c-4cc4-a5f7-e2df1b8d8317"]
+}
+]
+*)
+
