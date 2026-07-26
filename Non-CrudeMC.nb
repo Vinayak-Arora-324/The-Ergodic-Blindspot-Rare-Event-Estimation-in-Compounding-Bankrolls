@@ -1,0 +1,539 @@
+(* Content-type: application/vnd.wolfram.mathematica *)
+
+(*** Wolfram Notebook File ***)
+(* http://www.wolfram.com/nb *)
+
+(* CreatedBy='Wolfram 15.0' *)
+
+(*CacheID: 234*)
+(* Internal cache information:
+NotebookFileLineBreakTest
+NotebookFileLineBreakTest
+NotebookDataPosition[       154,          7]
+NotebookDataLength[     18888,        529]
+NotebookOptionsPosition[     18260,        512]
+NotebookOutlinePosition[     18653,        528]
+CellTagsIndexPosition[     18610,        525]
+WindowFrame->Normal*)
+
+(* Beginning of Notebook Content *)
+Notebook[{
+Cell[BoxData[""], "Input",
+ CellChangeTimes->{{3.993537793769792*^9, 3.9935378000051193`*^9}, {
+   3.993537909007675*^9, 3.993537912581781*^9}, {3.993537950031096*^9, 
+   3.9935380141438303`*^9}, 
+   3.993540507014167*^9},ExpressionUUID->"6e5ef5fa-5610-4984-88f4-\
+5386aa8ed505"],
+
+Cell[BoxData[""], "Input",
+ CellChangeTimes->{{3.993538007180949*^9, 3.993538047002689*^9}, 
+   3.99354096478028*^9, 
+   3.993541087992509*^9},ExpressionUUID->"f2f51bf4-3db7-440a-ae72-\
+e7b80ec78976"],
+
+Cell[BoxData["\[IndentingNewLine]"], "Input",
+ CellChangeTimes->{{3.993538179208929*^9, 3.993538196507546*^9}, 
+   3.993540809924592*^9},ExpressionUUID->"61df4e46-5797-47d6-9eb3-\
+eec3895e18dd"],
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"(*", 
+   RowBox[{"Proper", " ", "calculations"}], "*)"}], "\[IndentingNewLine]", 
+  RowBox[{"(*", 
+   RowBox[{
+   "Set", " ", "up", " ", "random", " ", "seed", " ", "and", " ", 
+    "parameters"}], "*)"}], "\[IndentingNewLine]", 
+  RowBox[{
+   RowBox[{
+    RowBox[{"SeedRandom", "[", "7", "]"}], ";"}], "\n", 
+   RowBox[{"(*", 
+    RowBox[{"Model", " ", "parameters"}], "*)"}], "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"lam", "=", "1.0*^-3"}], ";"}], "      ", 
+   RowBox[{"(*", 
+    RowBox[{"jump", " ", "prob"}], "*)"}], "\n", 
+   RowBox[{
+    RowBox[{"beta", "=", "1.5"}], ";"}], "        ", 
+   RowBox[{"(*", 
+    RowBox[{"mean", " ", "jump", " ", "size"}], "*)"}], "\n", 
+   RowBox[{
+    RowBox[{"s", "=", "0.05"}], ";"}], "          ", 
+   RowBox[{"(*", 
+    RowBox[{"bulk", " ", "vol"}], "*)"}], "\n", 
+   RowBox[{
+    RowBox[{"targetMu", "=", "0.005"}], ";"}], "  ", 
+   RowBox[{"(*", 
+    RowBox[{
+     RowBox[{"E", "[", "r", "]"}], "->", 
+     RowBox[{"unhedged", " ", "growth", " ", "g_u"}]}], "*)"}], "\n", 
+   RowBox[{
+    RowBox[{"m", "=", 
+     RowBox[{"targetMu", "+", 
+      RowBox[{"lam", "*", "beta"}]}]}], ";"}], "\[IndentingNewLine]", 
+   "\[IndentingNewLine]", 
+   RowBox[{"(*", 
+    RowBox[{
+    "Define", " ", "the", " ", "true", " ", "density", " ", "f", " ", "using",
+      " ", "a", " ", "MixtureDistribution"}], "*)"}], "\n", 
+   RowBox[{"(*", 
+    RowBox[{
+     RowBox[{"Python", "'"}], "s", " ", "exponnorm", 
+     RowBox[{"(", 
+      RowBox[{"-", "r"}], ")"}], " ", "is", " ", "equivalent", " ", "to", " ",
+      "flipping", " ", "the", " ", "sign", " ", "of", " ", "an", " ", "EMG", " ",
+      "distribution"}], "*)"}], "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"fDist", "=", 
+     RowBox[{"MixtureDistribution", "[", 
+      RowBox[{
+       RowBox[{"{", 
+        RowBox[{
+         RowBox[{"1", "-", "lam"}], ",", "lam"}], "}"}], ",", 
+       RowBox[{"{", 
+        RowBox[{
+         RowBox[{"NormalDistribution", "[", 
+          RowBox[{"m", ",", "s"}], "]"}], ",", 
+         RowBox[{"TransformedDistribution", "[", 
+          RowBox[{
+           RowBox[{"-", "x"}], ",", 
+           RowBox[{"x", "\[Distributed]", 
+            RowBox[{"ExponentialModifiedGaussianDistribution", "[", 
+             RowBox[{"m", ",", "s", ",", 
+              RowBox[{"1", "/", "beta"}]}], "]"}]}]}], "]"}]}], "}"}]}], 
+      "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{
+     RowBox[{"f", "[", "r_", "]"}], ":=", 
+     RowBox[{"PDF", "[", 
+      RowBox[{"fDist", ",", "r"}], "]"}]}], ";"}], "\[IndentingNewLine]", 
+   "\[IndentingNewLine]", 
+   RowBox[{"(*", 
+    RowBox[{"Random", " ", "sampling", " ", "function"}], "*)"}], "\n", 
+   RowBox[{
+    RowBox[{
+     RowBox[{"draw", "[", 
+      RowBox[{"n_", ",", "rate_"}], "]"}], ":=", 
+     RowBox[{"Module", "[", 
+      RowBox[{
+       RowBox[{"{", 
+        RowBox[{"jump", ",", "r"}], "}"}], ",", 
+       RowBox[{
+        RowBox[{"jump", "=", 
+         RowBox[{"Map", "[", 
+          RowBox[{
+           RowBox[{
+            RowBox[{"If", "[", 
+             RowBox[{
+              RowBox[{"#", "<", "rate"}], ",", "1", ",", "0"}], "]"}], "&"}], 
+           ",", 
+           RowBox[{"RandomReal", "[", 
+            RowBox[{
+             RowBox[{"{", 
+              RowBox[{"0", ",", "1"}], "}"}], ",", "n"}], "]"}]}], "]"}]}], ";",
+         "\[IndentingNewLine]", 
+        RowBox[{"r", "=", 
+         RowBox[{"RandomVariate", "[", 
+          RowBox[{
+           RowBox[{"NormalDistribution", "[", 
+            RowBox[{"m", ",", "s"}], "]"}], ",", "n"}], "]"}]}], ";", 
+        "\[IndentingNewLine]", 
+        RowBox[{"r", "-", 
+         RowBox[{"jump", "*", 
+          RowBox[{"RandomVariate", "[", 
+           RowBox[{
+            RowBox[{"ExponentialDistribution", "[", 
+             RowBox[{"1", "/", "beta"}], "]"}], ",", "n"}], "]"}]}]}]}]}], 
+      "]"}]}], ";"}], "\[IndentingNewLine]", "\[IndentingNewLine]", 
+   RowBox[{"(*", 
+    RowBox[{"Hedge", " ", "parameters"}], "*)"}], "\n", 
+   RowBox[{
+    RowBox[{"S0", "=", "100.0"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"K", "=", "50.0"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"c", "=", "0.0005"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{
+     RowBox[{"payoff", "[", "r_", "]"}], ":=", 
+     RowBox[{"Max", "[", 
+      RowBox[{
+       RowBox[{"K", "-", 
+        RowBox[{"S0", "*", 
+         RowBox[{"Exp", "[", "r", "]"}]}]}], ",", "0.0"}], "]"}]}], ";"}], 
+   "\n", "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{
+     RowBox[{"{", 
+      RowBox[{"LO", ",", "HI"}], "}"}], "=", 
+     RowBox[{"{", 
+      RowBox[{
+       RowBox[{"-", "40.0"}], ",", "2.0"}], "}"}]}], ";"}], 
+   "\[IndentingNewLine]", "\[IndentingNewLine]", 
+   RowBox[{"(*", 
+    RowBox[{"Ground", " ", "truth", " ", "using", " ", "quadrature", " ", 
+     RowBox[{"(", "NIntegrate", ")"}]}], "*)"}], "\n", 
+   RowBox[{
+    RowBox[{"price", "=", 
+     RowBox[{"NIntegrate", "[", 
+      RowBox[{
+       RowBox[{
+        RowBox[{"payoff", "[", "r", "]"}], "*", 
+        RowBox[{"f", "[", "r", "]"}]}], ",", 
+       RowBox[{"{", 
+        RowBox[{"r", ",", "LO", ",", "HI"}], "}"}], ",", 
+       RowBox[{"Method", "->", "\"\<GlobalAdaptive\>\""}], ",", 
+       RowBox[{"MaxRecursion", "->", "15"}]}], "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{
+     RowBox[{"logGrowth", "[", "r_", "]"}], ":=", 
+     RowBox[{"Log", "[", 
+      RowBox[{
+       RowBox[{
+        RowBox[{"(", 
+         RowBox[{"1", "-", "c"}], ")"}], "*", 
+        RowBox[{"Exp", "[", "r", "]"}]}], "+", 
+       RowBox[{"c", "*", 
+        RowBox[{
+         RowBox[{"payoff", "[", "r", "]"}], "/", "price"}]}]}], "]"}]}], 
+    ";"}], "\n", "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"gH", "=", 
+     RowBox[{"NIntegrate", "[", 
+      RowBox[{
+       RowBox[{
+        RowBox[{"logGrowth", "[", "r", "]"}], "*", 
+        RowBox[{"f", "[", "r", "]"}]}], ",", 
+       RowBox[{"{", 
+        RowBox[{"r", ",", "LO", ",", "HI"}], "}"}], ",", 
+       RowBox[{"Method", "->", "\"\<GlobalAdaptive\>\""}], ",", 
+       RowBox[{"MaxRecursion", "->", "15"}]}], "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"gU", "=", "targetMu"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"rStar", "=", 
+     RowBox[{"Log", "[", 
+      RowBox[{"K", "/", "S0"}], "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"pCrash", "=", 
+     RowBox[{"NIntegrate", "[", 
+      RowBox[{
+       RowBox[{"f", "[", "r", "]"}], ",", 
+       RowBox[{"{", 
+        RowBox[{"r", ",", "LO", ",", "rStar"}], "}"}], ",", 
+       RowBox[{"Method", "->", "\"\<GlobalAdaptive\>\""}], ",", 
+       RowBox[{"MaxRecursion", "->", "15"}]}], "]"}]}], ";"}], 
+   "\[IndentingNewLine]", "\[IndentingNewLine]", 
+   RowBox[{"(*", 
+    RowBox[{"Importance", " ", "Sampling", " ", "setup", " ", 
+     RowBox[{"(", 
+      RowBox[{"oversample", " ", "jumps"}], ")"}]}], "*)"}], "\n", 
+   RowBox[{
+    RowBox[{"lamQ", "=", "0.30"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"qDist", "=", 
+     RowBox[{"MixtureDistribution", "[", 
+      RowBox[{
+       RowBox[{"{", 
+        RowBox[{
+         RowBox[{"1", "-", "lamQ"}], ",", "lamQ"}], "}"}], ",", 
+       RowBox[{"{", 
+        RowBox[{
+         RowBox[{"NormalDistribution", "[", 
+          RowBox[{"m", ",", "s"}], "]"}], ",", 
+         RowBox[{"TransformedDistribution", "[", 
+          RowBox[{
+           RowBox[{"-", "x"}], ",", 
+           RowBox[{"x", "\[Distributed]", 
+            RowBox[{"ExponentialModifiedGaussianDistribution", "[", 
+             RowBox[{"m", ",", "s", ",", 
+              RowBox[{"1", "/", "beta"}]}], "]"}]}]}], "]"}]}], "}"}]}], 
+      "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{
+     RowBox[{"q", "[", "r_", "]"}], ":=", 
+     RowBox[{"PDF", "[", 
+      RowBox[{"qDist", ",", "r"}], "]"}]}], ";"}], "\[IndentingNewLine]", 
+   "\[IndentingNewLine]", 
+   RowBox[{"(*", 
+    RowBox[{"Simulation", " ", "setup"}], "*)"}], "\n", 
+   RowBox[{
+    RowBox[{"Nsim", "=", "5000"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"trials", "=", "2000"}], ";"}], "\[IndentingNewLine]", 
+   "\[IndentingNewLine]", 
+   RowBox[{"(*", 
+    RowBox[{"Run", " ", "Estimators"}], "*)"}], "\n", 
+   RowBox[{
+    RowBox[{"crude", "=", 
+     RowBox[{"Table", "[", 
+      RowBox[{
+       RowBox[{"Mean", "[", 
+        RowBox[{"logGrowth", "[", 
+         RowBox[{"draw", "[", 
+          RowBox[{"Nsim", ",", "lam"}], "]"}], "]"}], "]"}], ",", 
+       RowBox[{"{", "trials", "}"}]}], "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"imp", "=", 
+     RowBox[{"Table", "[", 
+      RowBox[{
+       RowBox[{"Module", "[", 
+        RowBox[{
+         RowBox[{"{", "xSim", "}"}], ",", 
+         RowBox[{
+          RowBox[{"xSim", "=", 
+           RowBox[{"draw", "[", 
+            RowBox[{"Nsim", ",", "lamQ"}], "]"}]}], ";", 
+          "\[IndentingNewLine]", 
+          RowBox[{"Mean", "[", 
+           RowBox[{
+            RowBox[{"logGrowth", "[", "xSim", "]"}], "*", 
+            RowBox[{"(", 
+             RowBox[{
+              RowBox[{"f", "[", "xSim", "]"}], "/", 
+              RowBox[{"q", "[", "xSim", "]"}]}], ")"}]}], "]"}]}]}], "]"}], ",", 
+       RowBox[{"{", "trials", "}"}]}], "]"}]}], ";"}], "\[IndentingNewLine]", 
+   "\[IndentingNewLine]", 
+   RowBox[{"(*", 
+    RowBox[{"Performance", " ", "metrics"}], "*)"}], "\n", 
+   RowBox[{
+    RowBox[{"medianCrude", "=", 
+     RowBox[{"Median", "[", "crude", "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"sdCrude", "=", 
+     RowBox[{"StandardDeviation", "[", "crude", "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"rmseCrude", "=", 
+     RowBox[{"Sqrt", "[", 
+      RowBox[{"Mean", "[", 
+       RowBox[{
+        RowBox[{"(", 
+         RowBox[{"crude", "-", "gH"}], ")"}], "^", "2"}], "]"}], "]"}]}], 
+    ";"}], "\n", 
+   RowBox[{
+    RowBox[{"pctCrudeCompounds", "=", 
+     RowBox[{
+      RowBox[{
+       RowBox[{"Count", "[", 
+        RowBox[{"crude", ",", 
+         RowBox[{"x_", "/;", 
+          RowBox[{"x", ">", "gU"}]}]}], "]"}], "/", "trials"}], "*", 
+      "100.0"}]}], ";"}], "\n", "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"medianImp", "=", 
+     RowBox[{"Median", "[", "imp", "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"sdImp", "=", 
+     RowBox[{"StandardDeviation", "[", "imp", "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"rmseImp", "=", 
+     RowBox[{"Sqrt", "[", 
+      RowBox[{"Mean", "[", 
+       RowBox[{
+        RowBox[{"(", 
+         RowBox[{"imp", "-", "gH"}], ")"}], "^", "2"}], "]"}], "]"}]}], ";"}],
+    "\n", 
+   RowBox[{
+    RowBox[{"pctImpCompounds", "=", 
+     RowBox[{
+      RowBox[{
+       RowBox[{"Count", "[", 
+        RowBox[{"imp", ",", 
+         RowBox[{"x_", "/;", 
+          RowBox[{"x", ">", "gU"}]}]}], "]"}], "/", "trials"}], "*", 
+      "100.0"}]}], ";"}], "\[IndentingNewLine]", "\[IndentingNewLine]", 
+   RowBox[{"(*", 
+    RowBox[{"Output", " ", "Results"}], "*)"}], "\n", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{"\"\<P(crash)  \>\"", ",", 
+      RowBox[{"ScientificForm", "[", 
+       RowBox[{"pCrash", ",", "3"}], "]"}], ",", "\"\<   (~\>\"", ",", 
+      RowBox[{"NumberForm", "[", 
+       RowBox[{
+        RowBox[{"Nsim", "*", "pCrash"}], ",", 
+        RowBox[{"{", 
+         RowBox[{"3", ",", "1"}], "}"}]}], "]"}], 
+      ",", "\"\< crashes per run of N=\>\"", ",", 
+      RowBox[{"IntegerName", "[", 
+       RowBox[{"Nsim", ",", "\"\<Words\>\""}], "]"}], ",", "\"\<)\>\""}], 
+     "]"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{"\"\<TRUTH     g_unhedged \>\"", ",", 
+      RowBox[{"NumberForm", "[", 
+       RowBox[{"gU", ",", 
+        RowBox[{"{", 
+         RowBox[{"7", ",", "6"}], "}"}], ",", 
+        RowBox[{"SignPadding", "->", "True"}]}], "]"}]}], "]"}], ";"}], "\n", 
+   
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{"\"\<TRUTH     g_hedged   \>\"", ",", 
+      RowBox[{"NumberForm", "[", 
+       RowBox[{"gH", ",", 
+        RowBox[{"{", 
+         RowBox[{"7", ",", "6"}], "}"}], ",", 
+        RowBox[{"SignPadding", "->", "True"}]}], "]"}], 
+      ",", "\"\<   -> hedge \>\"", ",", 
+      RowBox[{"If", "[", 
+       RowBox[{
+        RowBox[{"gH", ">", "gU"}], ",", "\"\<COMPOUNDS\>\"", 
+        ",", "\"\<BLEEDS\>\""}], "]"}], ",", "\"\< (edge \>\"", ",", 
+      RowBox[{"NumberForm", "[", 
+       RowBox[{
+        RowBox[{"gH", "-", "gU"}], ",", 
+        RowBox[{"{", 
+         RowBox[{"7", ",", "6"}], "}"}], ",", 
+        RowBox[{"SignPadding", "->", "True"}]}], "]"}], ",", "\"\<)\>\""}], 
+     "]"}], ";"}], "\n", "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{"\"\<\\n\>\"", ",", 
+      RowBox[{"StringPadRight", "[", 
+       RowBox[{"\"\<estimator\>\"", ",", "22"}], "]"}], ",", 
+      RowBox[{"StringPadLeft", "[", 
+       RowBox[{"\"\<median\>\"", ",", "10"}], "]"}], ",", 
+      RowBox[{"StringPadLeft", "[", 
+       RowBox[{"\"\<sd\>\"", ",", "10"}], "]"}], ",", 
+      RowBox[{"StringPadLeft", "[", 
+       RowBox[{"\"\<RMSE\>\"", ",", "10"}], "]"}], 
+      ",", "\"\<   says COMPOUNDS\>\""}], "]"}], ";"}], "\n", "\[IndentingNewLine]", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{
+      RowBox[{"StringPadRight", "[", 
+       RowBox[{"\"\<crude MC\>\"", ",", "22"}], "]"}], ",", 
+      RowBox[{"StringPadLeft", "[", 
+       RowBox[{
+        RowBox[{"ToString", "[", 
+         RowBox[{"NumberForm", "[", 
+          RowBox[{"medianCrude", ",", 
+           RowBox[{"{", 
+            RowBox[{"7", ",", "6"}], "}"}], ",", 
+           RowBox[{"SignPadding", "->", "True"}]}], "]"}], "]"}], ",", "10"}],
+        "]"}], ",", 
+      RowBox[{"StringPadLeft", "[", 
+       RowBox[{
+        RowBox[{"ToString", "[", 
+         RowBox[{"NumberForm", "[", 
+          RowBox[{"sdCrude", ",", 
+           RowBox[{"{", 
+            RowBox[{"7", ",", "6"}], "}"}]}], "]"}], "]"}], ",", "10"}], 
+       "]"}], ",", 
+      RowBox[{"StringPadLeft", "[", 
+       RowBox[{
+        RowBox[{"ToString", "[", 
+         RowBox[{"NumberForm", "[", 
+          RowBox[{"rmseCrude", ",", 
+           RowBox[{"{", 
+            RowBox[{"7", ",", "6"}], "}"}]}], "]"}], "]"}], ",", "10"}], 
+       "]"}], ",", "\"\<   \>\"", ",", 
+      RowBox[{"NumberForm", "[", 
+       RowBox[{"pctCrudeCompounds", ",", 
+        RowBox[{"{", 
+         RowBox[{"4", ",", "1"}], "}"}]}], "]"}], ",", "\"\<%\>\""}], "]"}], 
+    ";"}], "\n", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{
+      RowBox[{"StringPadRight", "[", 
+       RowBox[{"\"\<importance sampling\>\"", ",", "22"}], "]"}], ",", 
+      RowBox[{"StringPadLeft", "[", 
+       RowBox[{
+        RowBox[{"ToString", "[", 
+         RowBox[{"NumberForm", "[", 
+          RowBox[{"medianImp", ",", 
+           RowBox[{"{", 
+            RowBox[{"7", ",", "6"}], "}"}], ",", 
+           RowBox[{"SignPadding", "->", "True"}]}], "]"}], "]"}], ",", "10"}],
+        "]"}], ",", 
+      RowBox[{"StringPadLeft", "[", 
+       RowBox[{
+        RowBox[{"ToString", "[", 
+         RowBox[{"NumberForm", "[", 
+          RowBox[{"sdImp", ",", 
+           RowBox[{"{", 
+            RowBox[{"7", ",", "6"}], "}"}]}], "]"}], "]"}], ",", "10"}], 
+       "]"}], ",", 
+      RowBox[{"StringPadLeft", "[", 
+       RowBox[{
+        RowBox[{"ToString", "[", 
+         RowBox[{"NumberForm", "[", 
+          RowBox[{"rmseImp", ",", 
+           RowBox[{"{", 
+            RowBox[{"7", ",", "6"}], "}"}]}], "]"}], "]"}], ",", "10"}], 
+       "]"}], ",", "\"\<   \>\"", ",", 
+      RowBox[{"NumberForm", "[", 
+       RowBox[{"pctImpCompounds", ",", 
+        RowBox[{"{", 
+         RowBox[{"4", ",", "1"}], "}"}]}], "]"}], ",", "\"\<%\>\""}], "]"}], 
+    ";"}], "\[IndentingNewLine]", "\[IndentingNewLine]", 
+   RowBox[{"(*", 
+    RowBox[{"Weight", " ", "diagnostic"}], "*)"}], "\n", 
+   RowBox[{
+    RowBox[{"xDiag", "=", 
+     RowBox[{"draw", "[", 
+      RowBox[{"200000", ",", "lamQ"}], "]"}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"wDiag", "=", 
+     RowBox[{
+      RowBox[{"f", "[", "xDiag", "]"}], "/", 
+      RowBox[{"q", "[", "xDiag", "]"}]}]}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{"\"\<\\nIS weights bounded in [\>\"", ",", 
+      RowBox[{"NumberForm", "[", 
+       RowBox[{
+        RowBox[{"Min", "[", "wDiag", "]"}], ",", 
+        RowBox[{"{", 
+         RowBox[{"5", ",", "4"}], "}"}]}], "]"}], ",", "\"\<, \>\"", ",", 
+      RowBox[{"NumberForm", "[", 
+       RowBox[{
+        RowBox[{"Max", "[", "wDiag", "]"}], ",", 
+        RowBox[{"{", 
+         RowBox[{"5", ",", "4"}], "}"}]}], "]"}], 
+      ",", "\"\<] -> finite variance by construction\>\""}], "]"}], ";"}], "\n", 
+   RowBox[{
+    RowBox[{"Print", "[", 
+     RowBox[{"\"\<variance reduction factor: \>\"", ",", 
+      RowBox[{"NumberForm", "[", 
+       RowBox[{
+        RowBox[{
+         RowBox[{"(", 
+          RowBox[{"sdCrude", "/", "sdImp"}], ")"}], "^", "2"}], ",", 
+        RowBox[{"{", 
+         RowBox[{"4", ",", "1"}], "}"}]}], "]"}], ",", "\"\<x\>\""}], "]"}], 
+    ";"}]}]}]], "Input",
+ CellChangeTimes->{{3.993538198358842*^9, 3.993538198358861*^9}, {
+  3.9935408110994463`*^9, 3.993540812611917*^9}, {3.99354087289568*^9, 
+  3.993540874464488*^9}},ExpressionUUID->"db3962c5-168a-488a-ba06-\
+801c1b388c5f"]
+},
+WindowSize->{560.25, 645.75},
+WindowMargins->{{0, Automatic}, {Automatic, 0}},
+FrontEndVersion->"15.0 for Linux x86 (64-bit) (May 19, 2026)",
+StyleDefinitions->"Default.nb",
+ExpressionUUID->"8fdacc38-682a-40ad-9038-c6f674b79d74"
+]
+(* End of Notebook Content *)
+
+(* Internal cache information *)
+(*CellTagsOutline
+CellTagsIndex->{}
+*)
+(*CellTagsIndex
+CellTagsIndex->{}
+*)
+(*NotebookFileOutline
+Notebook[{
+Cell[554, 20, 279, 5, 29, "Input",ExpressionUUID->"6e5ef5fa-5610-4984-88f4-5386aa8ed505"],
+Cell[836, 27, 200, 4, 29, "Input",ExpressionUUID->"f2f51bf4-3db7-440a-ae72-e7b80ec78976"],
+Cell[1039, 33, 194, 3, 49, "Input",ExpressionUUID->"61df4e46-5797-47d6-9eb3-eec3895e18dd"],
+Cell[1236, 38, 17020, 472, 2393, "Input",ExpressionUUID->"db3962c5-168a-488a-ba06-801c1b388c5f"]
+}
+]
+*)
+
+(* End of internal cache information *)
+
