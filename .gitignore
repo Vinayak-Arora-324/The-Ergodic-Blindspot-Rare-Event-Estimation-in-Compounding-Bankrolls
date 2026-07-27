@@ -1,1 +1,4 @@
 Files/
+__pycache__/
+.venv/
+.claude/

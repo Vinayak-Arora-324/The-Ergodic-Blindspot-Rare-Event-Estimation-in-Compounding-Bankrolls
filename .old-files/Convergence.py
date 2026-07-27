@@ -142,5 +142,5 @@ axB.legend(fontsize=8.4, loc="lower left")
 axB.grid(alpha=0.3, which="both")
 
 fig.tight_layout()
-fig.savefig("/mnt/user-data/outputs/mc_estimator_convergence.png", dpi=170)
+fig.savefig("mc_estimator_convergence.png", dpi=170)
 print("\nsaved figure")
