@@ -14,17 +14,36 @@ strategy is the test case.
 | file | contents |
 |---|---|
 | `model.py` | the one canonical model — density, sampler, hedge, quadrature truth, the three estimators, the fGn driver |
-| `experiments.py` | E1–E5 behind a CLI |
+| `experiments.py` | E1–E5 behind a CLI, and the figure for each |
 | `test_regressions.py` | T1–T7 (verified numbers) and B1–B5 (committed bugs) |
 | `ReBuild-Spec.md` | the spec these were built from; the recorded numbers are the acceptance tests |
 | `.old-files/` | the exploratory scripts these replaced, kept for provenance. Several contain bugs B1–B5 and support the retracted claims in spec §5 — read them as history, not as reference |
 
 ```bash
 pip install -r requirements.txt
-python model.py                 # smoke test: density check + headline truths
-python experiments.py all       # ~15s; E3 writes mc_estimator_convergence.png
-python test_regressions.py      # ~3s
+python model.py                    # smoke test: density check + headline truths
+python experiments.py all          # ~15s; each experiment writes one .png
+python experiments.py all --no-plots   # the numbers only
+python test_regressions.py         # ~3s
 ```
+
+## Figures
+
+One per experiment, written to the repository root. They are results, not
+illustrations: three of the four findings below are statements about the *shape*
+of a distribution or about path space, and a table of numbers is the wrong
+instrument for both.
+
+| figure | what it shows |
+|---|---|
+| `e1_median_lies.png` | the sampling distribution at an affordable budget (52% of runs report exactly zero), then mean and median against budget |
+| `e2_variance_diagnosis.png` | where crashes carry the variance (63% unhedged vs 2% hedged), the CV's bad trade, and each method against the 1× line |
+| `mc_estimator_convergence.png` | E3: three sampling distributions at one *N*, and three `N^-1/2` slopes |
+| `e4_path_functionals.png` | the path fan, the mean-vs-median split, terminal wealth, and the drawdown tail |
+| `e5_error_bar_lies.png` | true vs reported SE against *T*, and the overconfidence factor that grows with *T* |
+
+Every E1–E4 figure carries the fair-pricing caveat in its footer, because a
+figure travels without its caption.
 
 ## Findings
 

@@ -343,11 +343,15 @@ def est_is(rng, n, markup=1.0):
     return (log_growth(y, markup) * w).mean()
 
 
-#: The three estimators of record, with the colours used in the E3 figure.
+#: The three estimators of record, with the colours they carry in every figure.
+#: Blue / orange / violet: checked, not eyeballed -- each clears 3:1 against a
+#: white ground and every pair stays separable under protanopia, deuteranopia
+#: and tritanopia. The earlier red/orange/green failed both, and green-vs-orange
+#: in particular is invisible to a protan reader, which is the most common form.
 ESTIMATORS = (
-    ("crude MC", est_crude, "#c0392b"),
-    ("+ control variate", est_cv, "#e67e22"),
-    ("+ CV + importance sampling", est_cv_is, "#1f6f4a"),
+    ("crude MC", est_crude, "#2a78d6"),
+    ("+ control variate", est_cv, "#eb6834"),
+    ("+ CV + importance sampling", est_cv_is, "#4a3aa7"),
 )
 
 
