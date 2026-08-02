@@ -2,3 +2,7 @@ Files/
 __pycache__/
 .venv/
 .claude/
+
+# Cached market data pulled by hurst_sp500.py -- regenerable, not source.
+data_*.csv
+chart.csv
