@@ -1,8 +1,11 @@
+# Core package and tests
 numpy
 scipy
 matplotlib
-__future__
-sys
-time
-model
-functools
+
+# Memory estimation and S&P analysis
+pandas
+scikit-learn
+
+# Market data fetch (first run only, then cached to data_*.csv)
+yfinance

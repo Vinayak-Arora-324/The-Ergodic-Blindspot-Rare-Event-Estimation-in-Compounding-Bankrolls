@@ -1,114 +1,154 @@
-# The Ergodic Blindspot — Rare-Event Estimation in Compounding Bankrolls
+# The Ergodic Blindspot
 
-A **methods** project. The object of study is the estimator; the tail-hedge
-strategy is the test case.
 
-> Simulate the growth of a finite bankroll running a tail-hedge rule under
-> fat-tailed dynamics; show which quantities are rare-event-dominated; and show
-> how much the answer moves with the estimator and the model. The deliverable is
-> a map of where the answer *can't* be known, not a verdict that tail hedging
-> works.
+The question for this project is whether, in a market regime resembling real conditions with a longer or shorter Hurst exponent over shorter periods but a diffusive one (0.5) around longer terms, how reliably can crude Monte Carlo and variance-reduction methods can price the same hedge and how they differ from realized outcomes
 
-## Layout
+The "ergodic blindspot" of the title is the gap between ensemble averages and
+the one compounding path a bankroll actually lives. E1 and E4 exhibit it
+directly: an unbiased estimator whose typical run reports zero, and path
+functionals -- win rate, maximum drawdown -- that no one-period expectation can
+reach. E5 and E7 show long-range dependence widening the gap by making reported
+error bars dishonest, and E8's finite-memory regimes are the construction that
+restores trustworthy long-run time averages.
 
-| file | contents |
-|---|---|
-| `model.py` | the one canonical model — density, sampler, hedge, quadrature truth, the three estimators, the fGn driver |
-| `experiments.py` | E1–E5 behind a CLI, and the figure for each |
-| `test_regressions.py` | T1–T7 (verified numbers) and B1–B5 (committed bugs) |
-| `ReBuild-Spec.md` | the spec these were built from; the recorded numbers are the acceptance tests |
-| `.old-files/` | the exploratory scripts these replaced, kept for provenance. Several contain bugs B1–B5 and support the retracted claims in spec §5 — read them as history, not as reference |
 
-```bash
-pip install -r requirements.txt
-python model.py                    # smoke test: density check + headline truths
-python experiments.py all          # ~15s; each experiment writes one .png
-python experiments.py all --no-plots   # the numbers only
-python test_regressions.py         # ~3s
+## At a glance
+
+```text
+blindspot/   model, estimators, experiments, and memory tools
+tests/       numerical and regression checks
+figures/     generated results with descriptive names
+docs/        research motivation and interpretation
+data/        regenerable market-data cache
 ```
 
-## Figures
+Run the central comparison with:
 
-One per experiment, written to the repository root. They are results, not
-illustrations: three of the four findings below are statements about the *shape*
-of a distribution or about path space, and a table of numbers is the wrong
-instrument for both.
+```bash
+.venv/bin/python -m blindspot.experiments e8
+```
 
-| figure | what it shows |
+## Central experiment: E8
+
+E8 combines the ingredients that E1–E7 study separately:
+
+- Frequent crashes or turbulent behaviour create a very fat left tail
+- lognormal stochastic volatility is driven locally by exact fGn;
+- fGn resets after 64 months, so a regime has local `H = 0.1`, `0.5`, or `0.8`
+  while aggregated variance eventually grows linearly and effective `H -> 0.5`;
+- `(0.1, 0.8)` alternates rough and persistent regimes in one history;
+- `Q` prices the monthly 30%-OTM put and assigns crashes probability 0.3%;
+- `P` generates bankroll outcomes and assigns crashes probability 0.1%;
+- the rolling strategy spends 0.1% of wealth on the conditionally Q-priced put
+  each month.
+
+The return model is
+
+```text
+r_t = drift(sigma_t, measure) + sigma_t Z_t - I_t E_t,
+sigma_t = 0.05 exp(0.65 G_t),
+E_t ~ Exponential(mean 0.60).
+```
+
+The drift pins the conditional expected gross return under each measure. This
+keeps option pricing under `Q` distinct from strategy evaluation under `P`.
+
+### Equal-budget estimators
+
+Every E8 pricing run receives 16,384 simulated month-observations and targets
+the same deterministic quadrature price:
+
+```text
+Q put price = 0.00063126 per unit spot
+```
+
+The four estimators are:
+
+1. crude Monte Carlo;
+2. crash-indicator control variate, using known `E_Q[I] = lambda_Q`;
+3. importance sampling, increasing simulated crash probability from 0.3% to
+   20% and applying the exact likelihood ratio;
+4. the control variate and importance sampling together.
+
+Across rough, Brownian, persistent, and alternating regimes, the recorded
+variance reductions are approximately:
+
+| method | variance reduction vs crude |
+|---|---:|
+| crash control | 1.4–1.6x |
+| importance sampling | 4.3–5.5x |
+| control + importance sampling | 4.4–5.6x |
+
+All four estimates remain unbiased within Monte Carlo error. Variance reduction
+makes the price cheaper to estimate; it does not make the strategy profitable.
+With the specified `Q` tail premium, the rolling hedge has roughly `-4e-4` mean
+monthly log carry and wins on about 7% of 10-year paths, while reducing the
+99th-percentile maximum drawdown by roughly 2–4 percentage points depending on
+the local volatility regime.
+
+![Unified experiment](figures/unified_comparison.png)
+
+## Why long-run H becomes 0.5
+
+A single constant-H fBm/fGn process cannot be both locally `H != 0.5` and
+asymptotically `H = 0.5`. E8 therefore uses independent finite regimes. For
+regime length `B`, horizon `n = qB + r`, and local exponent `H`,
+
+```text
+Var(sum G_t) = q B^(2H) + r^(2H).
+```
+
+Inside one regime this scales as `n^(2H)`. Across many regimes it is
+proportional to `n`, giving effective `H = 0.5`. Test T12 verifies this identity
+for rough, Brownian, persistent, and alternating regimes.
+
+
+## Run
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+.venv/bin/python -m blindspot.model
+.venv/bin/python -m blindspot.experiments e8
+.venv/bin/python -m blindspot.experiments all --no-plots
+.venv/bin/python -m tests.test_regressions
+
+# Empirical Hurst analysis; downloads ^GSPC on the first run.
+.venv/bin/python -m blindspot.sp500_memory
+
+# Standalone estimator demonstration (uses a synthetic walk without chart.csv).
+.venv/bin/python -m blindspot.memory
+```
+
+`experiments.py` uses fixed seeds. E8 uses seeds 8080–8083 for pricing and
+8180–8183 for strategy paths. The current regression suite contains 15 verified
+numerical/structural tests and five committed-bug guards.
+
+## Project layout
+
+| path | purpose |
 |---|---|
-| `e1_median_lies.png` | the sampling distribution at an affordable budget (52% of runs report exactly zero), then mean and median against budget |
-| `e2_variance_diagnosis.png` | where crashes carry the variance (63% unhedged vs 2% hedged), the CV's bad trade, and each method against the 1× line |
-| `mc_estimator_convergence.png` | E3: three sampling distributions at one *N*, and three `N^-1/2` slopes |
-| `e4_path_functionals.png` | the path fan, the mean-vs-median split, terminal wealth, and the drawdown tail |
-| `e5_error_bar_lies.png` | true vs reported SE against *T*, and the overconfidence factor that grows with *T* |
+| `blindspot/model.py` | canonical models, pricing formulas, simulators, and estimators |
+| `blindspot/experiments.py` | E1–E8 command line and figure generation |
+| `blindspot/memory.py` | variogram, DFA, Higuchi, and MFDFA estimators |
+| `blindspot/sp500_memory.py` | empirical S&P 500 memory analysis |
+| `blindspot/stable_tail.py` | retained corrected alpha-stable reference |
+| `tests/test_regressions.py` | T1–T15 and B1–B5 |
+| `docs/memory_evidence.md` | empirical motivation and limits of H estimation |
+| `figures/` | named result figures |
+| `data/` | regenerable market-data cache |
 
-Every E1–E4 figure carries the fair-pricing caveat in its footer, because a
-figure travels without its caption.
+## Interpretation limits
 
-## Findings
-
-Three ways a simulation lies, and one structural result.
-
-**1. The median lies** (E1). For a rare payoff, crude MC is exactly unbiased in
-expectation while the *typical* run reports near zero. Not bias — the extreme
-right-skew of the estimator's sampling distribution. The median estimate is
-exactly zero whenever the budget satisfies `N < ln2/p`.
-
-**2. The hard object is the edge, not the level** (E2). Hedging *destroys* the
-rare-event structure of the hedged quantity: in a crash the put payoff cancels
-the index loss, so hedged log-growth is mild and bounded. Crashes carry ~2% of
-its variance against ~63% for the unhedged return. Rare-event machinery is
-needed for the unhedged baseline and for the hedged-minus-unhedged *difference*,
-not for the hedged portfolio.
-
-**3. The error bar lies** (E5). Under long-memory volatility (`H = 0.8`),
-iid-formula confidence intervals are overconfident by 2.0× at `T = 256` and
-3.5× at `T = 4096` — the overconfidence *grows* with sample size. At `H = 0.1`
-the naive SE is fine, so the effect is long memory specifically, not roughness.
-
-**4. The estimand choice dominates the estimator choice** (E4). Under iid, the
-ergodic growth rate `g` collapses to a 1-D integral (LLN), so quadrature beats
-every Monte Carlo method and the rare-event machinery of E2/E3 is unnecessary.
-But path functionals — realized-path win rate, max drawdown, ruin — do not
-collapse, are unreachable by quadrature, and are what a finite bankroll actually
-cares about.
-
-## Headline numbers
-
-Truth by quadrature: `g_unhedged = +0.005000` (exact by construction),
-`g_hedged = +0.005852`, `edge = +0.000852`, `p_itm = 6.28e-4`.
-
-Variance reduction (E2/E3): the control variate **alone makes things worse**
-(0.6×) and importance sampling **alone also fails** (0.8×); composed, they give
-~190×. Neither half works alone. All three estimators nonetheless converge at
-`N^-1/2` — variance reduction moves the intercept of the convergence line, never
-the rate.
-
-Over 120 months (E4), the same configuration gives both of these at once:
-
-| | |
-|---|---|
-| mean difference across paths | `+0.1021` — matches `T·edge = +0.1023` |
-| median difference | `−0.0600` — the hedge loses on the typical path |
-| P(hedged beats unhedged on the realized path) | `7.13%` |
-| max drawdown, 99.9th pct, unhedged → hedged | `99.96%` → `75%` wipeout |
-
-The mean is carried entirely by the ~7% of paths where a put lands. The drawdown
-column is the actual case for tail hedging and it is invisible in `g` by
-construction.
-
-## Two caveats that travel with every number
-
-1. **Fair pricing.** `markup = 1.0` throughout: the put costs its actuarial
-   value. There is no variance risk premium at that setting, so every "the hedge
-   wins" result is conditional on a market that does not exist. `markup > 1` is
-   the first knob to sweep.
-2. **Quadrature is accurate here, not exact anywhere.** Adaptive `quad` over
-   `[-40, 2]` resolves the width-0.05 bulk only because the jump density spreads
-   mass across the interval and guides the subdivision. For a pure-normal
-   integrand the same call can silently return near zero. Verified by T1 and B4,
-   not assumed.
-
-Claims retracted during the exploratory phase are listed in `ReBuild-Spec.md` §5
-and must not be restated. `test_regressions.py` encodes the bugs that produced
-them.
+- E8 is a controlled methods experiment, not a calibrated trading strategy.
+- Its Gaussian-plus-negative-exponential mixture is strongly left-skewed and
+  much heavier-tailed than the Gaussian bulk, but it is not a regularly varying
+  Mandelbrot/Pareto tail; that tail-law choice remains a replaceable model layer.
+- The P/Q crash probabilities, memory cutoff, jump scale, strike, and spend are
+  explicit scenario parameters and should be swept before economic conclusions.
+- The memory is placed in volatility, not in return direction.
+- Reset regimes are a transparent finite-memory construction, not a claim that
+  real regimes terminate exactly every 64 months.
+- Tail drawdown estimates should carry quantile uncertainty before being treated
+  as production risk numbers.

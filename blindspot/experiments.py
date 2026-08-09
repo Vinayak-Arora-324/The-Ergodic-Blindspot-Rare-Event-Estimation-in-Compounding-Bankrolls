@@ -1,12 +1,13 @@
 """
-experiments.py -- the five experiments, behind one command line.
+experiments.py -- eight experiments, behind one command line.
 
-    python experiments.py            # list them
-    python experiments.py e1 e2      # run a subset
-    python experiments.py all        # run everything (each writes a .png)
-    python experiments.py all --no-plots    # numbers only, no figures
+    python -m blindspot.experiments             # list them
+    python -m blindspot.experiments e1 e2       # run a subset
+    python -m blindspot.experiments all         # run all and write figures
+    python -m blindspot.experiments all --no-plots
 
-Each experiment is one way a simulation lies, plus one structural result:
+E1-E7 isolate individual failure modes; E8 recombines the pieces into the
+original fat-tail, transient-memory hedge-pricing question.
 
   E1  the median lies       -- crude MC is unbiased in expectation while the
                                TYPICAL run reports near zero.
@@ -20,6 +21,11 @@ Each experiment is one way a simulation lies, plus one structural result:
   E5  the error bar lies    -- under long-memory volatility, iid-formula
                                confidence intervals get MORE overconfident as
                                the sample grows.
+  E6  drawdown family       -- one path estimand across rough/persistent H.
+  E7  honesty panel         -- grid bias and dependence defeat different
+                               estimator designs in different H regimes.
+  E8  unified pricing       -- fat tails, finite memory, separate P/Q measures,
+                               and crude/CV/IS/CV+IS at one compute budget.
 
 Conventions enforced throughout (see the rebuild spec, section 9):
   * every RNG is seeded explicitly and the seed is printed beside the results;
@@ -41,10 +47,14 @@ from __future__ import annotations
 
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 
-import model as M
+from . import model as M
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+FIGURES = PROJECT_ROOT / "figures"
 
 # Seeds of record. The numbers in the rebuild spec were generated with these.
 SEEDS = {"e1": 0, "e2": 7, "e3": 20, "e4": 31, "e5": 9}
@@ -143,22 +153,31 @@ def _grid(ax, axis="y", which="major"):
     ax.set_axisbelow(True)
 
 
-def _title(ax, head, sub, pad=17):
-    """Panel title: one bold claim, then what the reader is looking at.
+def _title(ax, head, sub=None, pad=9):
+    """Panel title: one short claim, and nothing else.
 
-    The sub-line sits between the title and the axes, so the title needs pad
-    enough to clear it -- 17pt for one 8.4pt line plus its leading, ~28 for
-    two. A two-line sub is worth the space when the alternative is parking a
-    text block on top of the data.
+    The claim goes in the title so it does not have to be parked on top of the
+    data. A sub-line is available but is deliberately rare -- if a panel needs
+    two lines of explanation to be read, the panel is doing too much and the
+    fix is to plot less, not to caption more. When a sub IS passed the title
+    needs pad enough to clear it: ~17pt for one 8.4pt line plus its leading.
     """
     ax.set_title(head, fontsize=10.5, fontweight="semibold", pad=pad)
-    ax.text(0.0, 1.012, sub, transform=ax.transAxes, fontsize=8.4,
-            color=INK_2, va="bottom", ha="left")
+    if sub:
+        ax.text(0.0, 1.012, sub, transform=ax.transAxes, fontsize=8.4,
+                color=INK_2, va="bottom", ha="left")
 
 
 def _note(fig, text):
-    """Footer note, set in the same grey as the axis furniture."""
+    """Footer note, set in the same grey as the axis furniture.
+
+    Records its own height on the figure so `_save` can reserve room for it:
+    the notes run to two lines on some figures and one on others, and a fixed
+    reserve either clips the long ones or floats the short ones.
+    """
     fig.text(0.006, 0.006, text, fontsize=7.4, color=MUTED, ha="left", va="bottom")
+    lines = text.count("\n") + 1
+    fig._note_bottom = 0.010 + lines * 11.0 / (fig.get_figheight() * 72.0)
 
 
 #: Travels on every E1-E4 figure, for the same reason it travels on every table.
@@ -171,7 +190,9 @@ FAIR_PRICING_FOOTER = (
 def _save(fig, outfile, top=0.92):
     """Write the PNG and say so, in the same voice as the rest of the output."""
     plt = _mpl()
-    fig.tight_layout(rect=(0, 0.028, 1, top))
+    outfile = Path(outfile)
+    outfile.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout(rect=(0, getattr(fig, "_note_bottom", 0.028), 1, top))
     fig.savefig(outfile, dpi=170)
     plt.close(fig)
     print(f"\nsaved {outfile}")
@@ -193,7 +214,7 @@ def _suptitle(fig, text, sub):
 # ---------------------------------------------------------------------------
 # E1 -- the median lies
 # ---------------------------------------------------------------------------
-def e1(trials=3000, outfile="e1_median_lies.png"):
+def e1(trials=3000, outfile=FIGURES / "rare_payoff.png"):
     """Single-period rare payoff: unbiased in expectation, near-zero typically.
 
     Estimand: E[put payoff] for one month, whose exact value is the fair price
@@ -298,29 +319,20 @@ def _e1_figure(ests, e_payoff, p, n_afford, ns, sweep, trials, outfile):
     ax_a.hist(ests, bins=np.linspace(0, ests.max(), 90), weights=share,
               color=BLUE, edgecolor="white", lw=0.4)
     ax_a.set_yscale("log")
-    ax_a.set_ylim(top=ax_a.get_ylim()[1] * 6)   # headroom for the annotation layer
+    ax_a.set_ylim(top=ax_a.get_ylim()[1] * 2.5)   # a little headroom over the spike
     ax_a.axvline(e_payoff, color=INK, ls="--", lw=1.6)
-    ax_a.annotate(f"truth {e_payoff:.4f}", (e_payoff, 0.60), xycoords=("data", "axes fraction"),
+    ax_a.annotate(f"truth {e_payoff:.4f}", (e_payoff, 0.66), xycoords=("data", "axes fraction"),
                   textcoords="offset points", xytext=(7, 0), fontsize=8.4, color=INK)
-    ax_a.annotate(
-        f"{(ests == 0).mean():.0%} of runs report exactly zero.\n"
-        f"Median = 0.  Mean = {ests.mean():.4f}: unbiased.",
-        (0, (ests == 0).mean() * 100), xytext=(0.20, 0.93), textcoords="axes fraction",
-        fontsize=8.4, color=INK_2, va="top",
-        arrowprops=dict(arrowstyle="->", color=MUTED, lw=0.9,
-                        connectionstyle="angle3,angleA=0,angleB=75"))
-    ax_a.annotate("and the entire mean is carried out here,\n"
-                  "by the runs that happened to see a crash",
-                  (ests.max() * 0.72, 0.05), xytext=(0.97, 0.42),
-                  textcoords="axes fraction", ha="right", va="top",
-                  fontsize=8.4, color=INK_2,
-                  arrowprops=dict(arrowstyle="->", color=MUTED, lw=0.9,
-                                  connectionstyle="angle3,angleA=0,angleB=80"))
+    # White ground: this label sits at the spike, and the truth line runs
+    # through the space the text needs.
+    ax_a.annotate(f"{(ests == 0).mean():.0%} report zero", (0, 0.88),
+                  xycoords=("data", "axes fraction"), textcoords="offset points",
+                  xytext=(7, 0), fontsize=8.4, color=INK_2,
+                  bbox=dict(facecolor="white", edgecolor="none", pad=1.4))
     ax_a.set_xlabel("estimate of E[put payoff] from one run")
     ax_a.set_ylabel("share of runs (%, log scale)")
     _grid(ax_a)
-    _title(ax_a, f"A. One affordable run, {trials:,} times over",
-           f"N = {n_afford:,} draws per run, ~{n_afford * p:.2f} crashes expected")
+    _title(ax_a, f"A. Median 0, mean {ests.mean():.4f}: unbiased and useless")
 
     # --- B. mean and median against budget ---
     ax_b.axhline(e_payoff, color=INK, ls="--", lw=1.6)
@@ -330,23 +342,22 @@ def _e1_figure(ests, e_payoff, p, n_afford, ns, sweep, trials, outfile):
     ax_b.plot(ns, sweep["mean"], "o-", color=BLUE, ms=5, label="mean of runs  (±2 MC-SE)")
     ax_b.plot(ns, sweep["median"], "o-", color=ORANGE, ms=5, label="median run")
     ax_b.axvline(n_thresh, color=MUTED, ls=":", lw=1.4)
-    ax_b.text(0.315, 0.34, f"N = ln2/p = {n_thresh:,.0f}\nmedian is exactly 0\nto the left of here",
-              transform=ax_b.transAxes, ha="right", va="center",
-              multialignment="right", fontsize=8.0, color=MUTED)
+    ax_b.annotate(f"N = ln2/p = {n_thresh:,.0f}", (n_thresh, 0.80),
+                  xycoords=("data", "axes fraction"), textcoords="offset points",
+                  xytext=(-7, 0), ha="right", fontsize=8.0, color=MUTED)
     ax_b.set_xscale("log")
     ax_b.set_xlabel("samples per run, N")
     ax_b.set_ylabel("estimate of E[put payoff]")
     ax_b.set_ylim(-0.1 * e_payoff, 1.9 * e_payoff)
     ax_b.legend(loc="upper left")
     _grid(ax_b)
-    _title(ax_b, "B. The mean is right at every budget",
-           "the median climbs to it from below, and only from below")
+    _title(ax_b, "B. The mean is right at every budget")
 
     # --- C. the same thing as a failure rate ---
     ax_c.plot(ns, 100 * sweep["p_zero"], "o-", color=BLUE, ms=5,
-              label="runs that saw no crash at all")
+              label="saw no crash at all")
     ax_c.plot(ns, 100 * sweep["p_half"], "o-", color=ORANGE, ms=5,
-              label="runs reporting less than half the truth")
+              label="reported less than half the truth")
     ax_c.axvline(n_thresh, color=MUTED, ls=":", lw=1.4)
     ax_c.axhline(50, color=INK, ls="--", lw=1.2)
     ax_c.text(ns[-1], 52, "half of runs", fontsize=8.0, color=INK, ha="right")
@@ -356,21 +367,21 @@ def _e1_figure(ests, e_payoff, p, n_afford, ns, sweep, trials, outfile):
     ax_c.set_ylim(-3, 103)
     ax_c.legend(loc="upper right")
     _grid(ax_c)
-    _title(ax_c, "C. It is a budget problem, not a bias",
-           "nothing about the estimator changes along this axis")
+    _title(ax_c, "C. A budget problem, not a bias")
 
     _suptitle(fig, "E1  The median lies",
-              "Crude MC for a rare payoff is exactly unbiased in expectation, and "
-              "the run you can afford still reports zero.")
+              "Crude MC for a rare payoff is unbiased in expectation, and the run "
+              "you can afford still reports zero.")
     _note(fig, "Estimand: E[put payoff] over one month, truth by quadrature. "
                "Unbiasedness is a property of the average over runs; you get one run.")
-    _save(fig, outfile, top=0.87)
+    _save(fig, outfile, top=0.88)
 
 
 # ---------------------------------------------------------------------------
 # E2 -- iid growth baseline and variance diagnosis
 # ---------------------------------------------------------------------------
-def e2(n=5000, trials=2000, n_diag=2_000_000, outfile="e2_variance_diagnosis.png"):
+def e2(n=5000, trials=2000, n_diag=2_000_000,
+       outfile=FIGURES / "variance_methods.png"):
     """Truth, the three estimators, the variance decomposition, sample counts.
 
     Two findings that the code must not "correct":
@@ -490,16 +501,8 @@ def _e2_figure(lg, d, x, crash_share, sds, n, trials, ms, outfile):
                   ha="center", fontsize=11.5, color=INK, fontweight="semibold")
     ax_a.set_ylabel("share of variance carried by crashes (%)")
     ax_a.set_ylim(0, 100)
-    ax_a.annotate("hedging DESTROYS the rare-event\nstructure it was meant to capture:\n"
-                  "in a crash the payoff cancels the\nindex loss, so what is left is mild",
-                  (1, shares[1]), textcoords="offset points", xytext=(-8, 34),
-                  ha="center", fontsize=8.2, color=INK_2)
     _grid(ax_a)
-    # Panel B needs a two-line sub, so all three carry one: titles that sit at
-    # three different heights across one figure read as three figures.
-    _title(ax_a, "A. The rare event is not in the hedged quantity",
-           f"law of total variance over {len(x):,} draws,\ncrash = $r < \\log(K/S_0)$",
-           pad=28)
+    _title(ax_a, "A. Hedging destroys the rare event it was built for")
 
     # --- B. the two per-sample distributions the estimators actually average ---
     ax_b.hist(lg, bins=140, histtype="step", lw=2.0, color=BLUE, density=True,
@@ -516,10 +519,7 @@ def _e2_figure(lg, d, x, crash_share, sds, n, trials, ms, outfile):
     # data to make room for its own key is not a trade a figure gets to make.
     ax_b.legend(loc="lower left")
     _grid(ax_b)
-    _title(ax_b, "B. The control variate trades bulk noise for skew",
-           "$D$ is a spike at $\\log(1-c)$ plus a pure crash tail: narrower in\n"
-           "the bulk, but skewed enough that its sd is LARGER than the level's",
-           pad=28)
+    _title(ax_b, "B. The control variate trades bulk noise for skew")
 
     # --- C. what each method is worth, against the 1x line ---
     order = [(name, col) for name, _, col in M.ESTIMATORS]
@@ -537,31 +537,32 @@ def _e2_figure(lg, d, x, crash_share, sds, n, trials, ms, outfile):
                   fontsize=10, color=INK, fontweight="semibold",
                   bbox=dict(facecolor="white", edgecolor="none", pad=1.4))
     ax_c.axhline(1.0, color=INK, ls="--", lw=1.5)
-    ax_c.text(-0.45, 1.62, "1x: no better than crude MC", fontsize=8.2, color=INK,
-              ha="left")
+    # Above the line and hard right: every bar descends from its own top to the
+    # floor, so the only clear space in the frame is over the short last bar.
+    ax_c.text(len(ratios) - 0.55, 1.55, "1x: no better than crude MC", fontsize=8.2,
+              color=INK, ha="right", va="bottom")
     ax_c.set_yscale("log")
     ax_c.set_ylim(0.3, max(ratios) * 4)
     ax_c.set_ylabel("variance reduction vs crude MC (log scale)")
-    ax_c.text(0.02, 0.46, "each half alone LOSES;\nonly composed do they win",
-              transform=ax_c.transAxes, va="top", fontsize=8.4, color=INK_2)
     _grid(ax_c)
-    _title(ax_c, "C. Neither half works alone",
-           f"N = {n:,} per run, {trials:,} runs;\nCV reshapes the estimand IS was built for",
-           pad=28)
+    _title(ax_c, "C. Neither half works alone")
 
     _suptitle(fig, "E2  The variance is in the baseline, not the hedge",
               "Diagnose where a rare event carries the variance before reaching "
               "for rare-event machinery.")
-    _note(fig, f"{FAIR_PRICING_FOOTER}  Deflation: quadrature returns this same "
-               f"answer in {ms:.0f} ms with no samples at all -- see E4 for where "
-               f"that stops being true.")
-    _save(fig, outfile, top=0.88)
+    _note(fig, f"A: law of total variance over {len(x):,} draws, crash = "
+               f"$r < \\log(K/S_0)$.  C: N = {n:,} per run, {trials:,} runs.  "
+               f"{FAIR_PRICING_FOOTER}\nQuadrature returns this same answer in "
+               f"{ms:.0f} ms with no samples at all -- see E4 for where that stops "
+               f"being true.")
+    _save(fig, outfile, top=0.90)
 
 
 # ---------------------------------------------------------------------------
 # E3 -- the convergence figure
 # ---------------------------------------------------------------------------
-def e3(n_panel_a=4096, trials_a=2000, trials_b=300, outfile="mc_estimator_convergence.png"):
+def e3(n_panel_a=4096, trials_a=2000, trials_b=300,
+       outfile=FIGURES / "convergence.png"):
     """Two panels: sampling distributions at one N, and sd vs N on log-log.
 
     The caption is deliberately deflationary, and that is the point of the
@@ -645,14 +646,13 @@ def _e3_figure(samples, ns, sds, n_star, thresh, g_h, g_u, n_panel_a, outfile):
     ax_a.set_ylabel("density (log scale)")
     ax_a.legend(loc="upper left", fontsize=7.8)
     _grid(ax_a)
-    _title(ax_a, f"A. Sampling distribution at an affordable N = {n_panel_a:,}",
-           "the gap between the two black lines is the entire decision")
+    _title(ax_a, f"A. One affordable budget, N = {n_panel_a:,}")
 
     # --- B. sd against N, all three slopes ---
     for name, _, col in M.ESTIMATORS:
         ax_b.plot(ns, sds[name], "o-", color=col, ms=5, label=name)
     ax_b.axhline(thresh, color=INK, ls="--", lw=1.5)
-    ax_b.text(ns[0] * 1.06, thresh * 1.18, "sd needed to call the sign at $2\\sigma$",
+    ax_b.text(ns[0] * 1.06, thresh * 1.18, "sd needed to call the sign",
               fontsize=8.2, color=INK, va="bottom")
     # Stagger the labels vertically: crude and +cv cross the threshold at
     # similar N and their annotations would otherwise overlap.
@@ -669,24 +669,21 @@ def _e3_figure(samples, ns, sds, n_star, thresh, g_h, g_u, n_panel_a, outfile):
     ax_b.set_ylabel("sd of the estimator (log scale)")
     ax_b.legend(loc="lower left")
     _grid(ax_b, axis="both", which="both")
-    _title(ax_b, "B. Every slope is $N^{-1/2}$",
-           "variance reduction moves the intercept, never the rate")
-    ax_b.annotate("quadrature needs no $N$ at all, so the method that\n"
-                  "actually wins here cannot be drawn on these axes",
-                  (0.97, 0.93), xycoords="axes fraction", ha="right", va="top",
-                  fontsize=8.4, color=INK_2)
+    _title(ax_b, "B. Every slope is $N^{-1/2}$")
 
     _suptitle(fig, "E3  Variance reduction moves the intercept, not the rate",
               "Three unbiased estimators of the same number, and the log-log plot "
               "that cannot see its own blind spot.")
-    _note(fig, FAIR_PRICING_FOOTER)
-    _save(fig, outfile, top=0.88)
+    _note(fig, f"{FAIR_PRICING_FOOTER}\nQuadrature needs no $N$ at all, so the "
+               f"method that actually wins here cannot be drawn on these axes.")
+    _save(fig, outfile, top=0.90)
 
 
 # ---------------------------------------------------------------------------
 # E4 -- path functionals (the most important experiment)
 # ---------------------------------------------------------------------------
-def e4(horizon=120, paths=400_000, n_track=5_000, outfile="e4_path_functionals.png"):
+def e4(horizon=120, paths=400_000, n_track=5_000,
+       outfile=FIGURES / "bankroll_paths.png"):
     """What a finite bankroll cares about, and what quadrature cannot reach.
 
     Common random numbers: the hedged and unhedged bankrolls face the IDENTICAL
@@ -846,13 +843,8 @@ def _e4_figure(traj_u, traj_h, x_u, x_h, diff, dd_u, dd_h, edge, win,
     ax_a.set_xlabel("months")
     ax_a.set_ylabel("cumulative log wealth")
     ax_a.legend(loc="upper left")
-    ax_a.text(0.03, 0.125, "The median paths are indistinguishable and $T\\times g_h$ runs "
-              "through both.\nEverything the hedge does is in the 5% floor -- and B, C, D "
-              "are what\nit takes to see even that much.",
-              transform=ax_a.transAxes, va="top", fontsize=8.2, color=INK_2)
     _grid(ax_a)
-    _title(ax_a, "A. The two bankrolls, month by month",
-           f"{traj_u.shape[1]:,} paths under common random numbers, {horizon} months")
+    _title(ax_a, "A. The two bankrolls are indistinguishable here")
 
     # --- B. the difference across paths, mean vs median ---
     med = np.median(diff)
@@ -863,23 +855,18 @@ def _e4_figure(traj_u, traj_h, x_u, x_h, diff, dd_u, dd_h, edge, win,
     ax_b.axvline(med, color=INK, ls=":", lw=1.6)
     ax_b.set_xlim(left=med - 0.35)
     # The mean and the median differ by 0.16 on an axis nine log points wide, so
-    # pointing at each line separately would put two arrowheads in one place.
-    # One block, one arrow, and the numbers said out loud instead.
-    ax_b.annotate(f"mean   {diff.mean():+.4f}   (dashed) $= T\\times$edge, as promised\n"
-                  f"median {med:+.4f}   (dotted) -- the typical path pays the\n"
-                  f"premium and gets nothing back\n\n"
-                  f"Both lines sit here, {diff.mean() - med:.2f} apart. The gap between them\n"
-                  f"is manufactured entirely by the tail running off to the right.",
-                  (med, 0.62), xycoords=("data", "axes fraction"),
-                  xytext=(0.30, 0.96), textcoords="axes fraction", va="top",
-                  fontsize=8.4, color=INK,
-                  arrowprops=dict(arrowstyle="->", color=MUTED, lw=0.9,
-                                  connectionstyle="angle3,angleA=0,angleB=75"))
+    # both labels are stacked at the same place and staggered in height rather
+    # than pointed at individually.
+    ax_b.annotate(f"mean {diff.mean():+.3f}", (diff.mean(), 0.93),
+                  xycoords=("data", "axes fraction"), textcoords="offset points",
+                  xytext=(9, 0), fontsize=8.4, color=INK)
+    ax_b.annotate(f"median {med:+.3f}", (med, 0.80),
+                  xycoords=("data", "axes fraction"), textcoords="offset points",
+                  xytext=(9, 0), fontsize=8.4, color=INK)
     ax_b.set_xlabel("hedged $-$ unhedged terminal log wealth, per path")
     ax_b.set_ylabel("paths (log scale)")
     _grid(ax_b)
-    _title(ax_b, "B. Both of these are true at once",
-           f"a positive mean edge, and a loss on {1 - win:.0%} of paths")
+    _title(ax_b, f"B. A positive mean edge, and a loss on {1 - win:.0%} of paths")
 
     # --- C. terminal wealth, and its left tail ---
     lo = min(np.percentile(x_u, 0.05), np.percentile(x_h, 0.05))
@@ -892,13 +879,8 @@ def _e4_figure(traj_u, traj_h, x_u, x_h, diff, dd_u, dd_h, edge, win,
     ax_c.set_xlabel(f"terminal log wealth after {horizon} months")
     ax_c.set_ylabel("density (log scale)")
     ax_c.legend(loc="upper left")
-    ax_c.text(0.94, 0.30, "identical in the bulk,\nwhere a bankroll spends\n"
-              "its life. Everything the\nhedge does is in the left tail.",
-              transform=ax_c.transAxes, ha="right", va="top",
-              fontsize=8.2, color=INK_2)
     _grid(ax_c)
-    _title(ax_c, "C. The distributions the two bankrolls actually face",
-           f"signal / path noise over the horizon: {horizon * edge / x_h.std(ddof=1):.3f}")
+    _title(ax_c, "C. Identical in the bulk; the hedge lives in the left tail")
 
     # --- D. the drawdown tail: the actual case for the hedge ---
     p_exceed = np.logspace(np.log10(0.5), np.log10(2e-4), 140)
@@ -919,22 +901,24 @@ def _e4_figure(traj_u, traj_h, x_u, x_h, diff, dd_u, dd_h, edge, win,
     ax_d.set_ylabel("share of paths that exceed it (%, log scale)")
     ax_d.legend(loc="lower left")
     _grid(ax_d)
-    _title(ax_d, "D. What the hedge is actually for",
-           "a running-extremum functional: no one-period integral can reach it")
+    _title(ax_d, "D. What the hedge is actually for: the drawdown tail")
 
     _suptitle(fig, "E4  The estimand choice dominates the estimator choice",
               "Under iid returns quadrature beats every estimator in E2-E3 -- and "
               "cannot reach a single quantity on this page.")
-    _note(fig, f"{FAIR_PRICING_FOOTER}  {paths:,} paths, common random numbers: "
-               f"both bankrolls face the identical realized market, month by month.")
-    _save(fig, outfile, top=0.93)
+    _note(fig, f"{FAIR_PRICING_FOOTER}\n{paths:,} paths over {horizon} months, "
+               f"common random numbers: both bankrolls face the identical realized "
+               f"market, month by month. Signal / path noise over the horizon: "
+               f"{horizon * edge / x_h.std(ddof=1):.3f}.\nD is a running-extremum "
+               f"functional, which no one-period integral can reach.")
+    _save(fig, outfile, top=0.94)
 
 
 # ---------------------------------------------------------------------------
 # E5 -- the error bar lies
 # ---------------------------------------------------------------------------
 def e5(t_max=4096, paths=1200, hursts=(0.8, 0.1), ts=(256, 1024, 4096),
-       outfile="e5_error_bar_lies.png"):
+       outfile=FIGURES / "memory_error_bars.png"):
     """Long-memory volatility makes the reported confidence interval dishonest.
 
     The first experiment whose estimand is genuinely path-space rather than a
@@ -1048,9 +1032,9 @@ def _e5_figure(curves, paths, outfile):
         col = HURST_COLOURS[i % len(HURST_COLOURS)]
         kind = "long memory" if h > 0.5 else "rough"
         ax_a.plot(c["t"], c["true"], "o-", color=col, ms=5,
-                  label=f"H = {h} ({kind})   TRUE SE, across paths")
+                  label=f"H = {h} ({kind})   true SE")
         ax_a.plot(c["t"], c["naive"], "o--", color=col, ms=4, alpha=0.75,
-                  label=f"H = {h}   NAIVE SE, sd/$\\sqrt{{T}}$ from one path")
+                  label=f"H = {h}   reported SE")
         ax_b.plot(c["t"], c["true"] / c["naive"], "o-", color=col, ms=5,
                   label=f"H = {h} ({kind})")
         ax_b.annotate(f"{c['true'][-1] / c['naive'][-1]:.1f}x",
@@ -1064,8 +1048,7 @@ def _e5_figure(curves, paths, outfile):
     ax_a.set_ylabel("standard error of the growth-rate estimate (log scale)")
     ax_a.legend(loc="lower left", fontsize=7.8)
     _grid(ax_a, axis="both", which="both")
-    _title(ax_a, "A. The reported error bar and the real one",
-           "they coincide at H = 0.1 and separate at H = 0.8 -- and keep separating")
+    _title(ax_a, "A. The reported error bar and the real one")
 
     ax_b.axhline(1.0, color=INK, ls="--", lw=1.5)
     ax_b.set_xscale("log")      # before any axes-fraction text: log rescales x
@@ -1074,32 +1057,435 @@ def _e5_figure(curves, paths, outfile):
     ax_b.set_ylim(0, None)
     ax_b.legend(loc="upper left")
     _grid(ax_b)
-    ax_b.text(0.015, 0.90, "1x: an honest error bar", transform=ax_b.get_yaxis_transform(),
+    ax_b.text(0.015, 0.92, "1x: an honest error bar", transform=ax_b.get_yaxis_transform(),
               va="top", fontsize=8.2, color=INK)
-    ax_b.text(0.04, 0.44, "the curve slopes UP: every extra month of data\n"
-              "makes the reported confidence interval worse.\n"
-              "Not a small-sample problem -- the opposite of one.",
-              transform=ax_b.transAxes, va="top", fontsize=8.4, color=INK_2)
-    _title(ax_b, "B. More data makes it worse",
-           "the same overconfidence as a single factor, against an honest 1x")
+    _title(ax_b, "B. More data makes it worse")
 
     _suptitle(fig, "E5  The error bar lies, and lies harder with more data",
               "Same estimator, same model, two ways of reporting its uncertainty.")
     _note(fig, f"{paths:,} independent paths per H, exact fGn by Cholesky. Returns "
                f"stay serially uncorrelated: memory enters only through the "
-               f"variance drag $\\sigma_t^2/2$. No fat tails in this model at all.")
-    _save(fig, outfile, top=0.88)
+               f"variance drag $\\sigma_t^2/2$. No fat tails in this model at all."
+               f"\nB slopes UP: every extra month of data makes the reported interval "
+               f"worse. Not a small-sample problem -- the opposite of one.")
+    _save(fig, outfile, top=0.90)
+
+
+# ---------------------------------------------------------------------------
+# E6 -- the estimand: a drawdown family indexed by H
+# ---------------------------------------------------------------------------
+def e6(paths=200_000, hursts=(0.1, 0.3, 0.5, 0.7, 0.9),
+       outfile=FIGURES / "drawdown_by_hurst.png"):
+    """Max-drawdown exceedance curves for the fBm bankroll family, one per H.
+
+    One estimand, one family parameter, read at one level.  Everything E7 says
+    about error bars is about the number this figure reads off: the drawdown
+    exceeded by 1 path in 1,000 over a 12-month horizon, measured on the daily
+    grid.
+
+    The exceedance curve rather than a histogram, and log y, for E4's reason:
+    the whole claim lives past the 99th percentile, where a histogram has no
+    resolution and no reader can count bars.
+    """
+    _banner("E6", "the estimand -- drawdown against the family parameter H")
+    print("Log wealth is fBm with Hurst H; terminal variance is pinned across H,")
+    print("so H moves the SHAPE of the path and not its scale. Daily grid.\n")
+    print(f"  {'H':>5} {'median':>9} {'99th':>9} {'99.9th':>9} {'ratio':>8}")
+
+    rng = np.random.default_rng(606)
+    curves, reads = {}, {}
+    for h in hursts:
+        dd = M.drawdown_replicates(h, paths, rng, sub=M.DD_SUB)
+        curves[h] = np.sort(M.wipeout(dd))
+        q50, q99, q999 = np.percentile(curves[h], [50, 99, 99.9])
+        reads[h] = q999
+        print(f"  {h:5.1f} {q50:8.2f}% {q99:8.2f}% {q999:8.2f}% {q999 / q50:7.1f}x")
+
+    lo, hi = reads[max(hursts)], reads[min(hursts)]
+    print(f"\nThe 1-in-1000 drawdown runs from {lo:.1f}% at H = {max(hursts)} to "
+          f"{hi:.1f}% at H = {min(hursts)}:")
+    print("rough paths spend the same terminal variance on far deeper round trips.")
+    print("No one-period integral reaches any of these numbers -- E4's point, now")
+    print("as a family. E7 asks whether either way of estimating one is honest.")
+
+    if PLOTS:
+        _e6_figure(curves, reads, paths, outfile)
+    return curves
+
+
+def _e6_figure(curves, reads, paths, outfile):
+    """One panel. Five curves, one read line, and nothing else.
+
+    Colour runs light-to-dark with H so the family reads as an ordered sweep
+    rather than five unrelated series; the legend is therefore redundant with
+    the direct labels and is dropped.
+    """
+    plt = _mpl()
+    fig, ax = plt.subplots(1, 1, figsize=(9.4, 6.2))
+    hs = sorted(curves)
+    # Viridis truncated at both ends: the pale yellow tail of the full map does
+    # not clear 3:1 on white, and the family has to stay legible as an ordered
+    # ramp, so the sweep runs dark violet to mid teal-green and stops there.
+    cmap = plt.get_cmap("viridis")
+    level = 100 - M.DD_LEVEL                      # 0.1% of paths
+    top = max(reads.values())
+
+    for i, h in enumerate(hs):
+        v = curves[h]
+        col = cmap(0.06 + 0.62 * (1 - i / max(len(hs) - 1, 1)))
+        # Exceedance: share of paths whose drawdown is worse than x.
+        share = 100.0 * (1.0 - np.arange(v.size) / v.size)
+        keep = share >= 0.6 * level
+        ax.plot(v[keep], share[keep], color=col, lw=2.0,
+                label=f"H = {h}      {reads[h]:4.1f}%")
+        ax.plot([reads[h]], [level], "o", color=col, ms=8, zorder=5,
+                markeredgecolor="white", markeredgewidth=1.5)
+
+    ax.axhline(level, color=INK, ls=":", lw=1.3)
+    ax.text(1.5, level * 1.13, "1 path in 1,000", fontsize=8.4, color=INK, va="bottom")
+    ax.set_yscale("log")
+    ax.set_xlim(0, 1.18 * top)
+    ax.set_ylim(0.6 * level, 130)
+    ax.set_xlabel(f"maximum drawdown over {M.DD_HORIZON} months (% of wealth)")
+    ax.set_ylabel("share of paths that exceed it (%, log scale)")
+    # Five near-parallel curves converge in the tail, so direct labels would
+    # collide exactly where the reader is looking. The key carries the read-off
+    # instead, and sits in the one empty quadrant.
+    leg = ax.legend(loc="upper right", bbox_to_anchor=(1.0, 0.95),
+                    title="                1 in 1,000", alignment="left")
+    leg.get_title().set_fontsize(8.2)
+    leg.get_title().set_color(INK_2)
+    _grid(ax)
+    _title(ax, "Same terminal variance, and a 1-in-1000 drawdown that is not the same")
+
+    _suptitle(fig, "E6  One estimand, one family parameter",
+              "Log wealth is fBm of Hurst H, terminal variance pinned across H. "
+              "This is the number E7 tries to put an error bar on.")
+    _note(fig, f"{paths:,} independent paths per H on the daily grid "
+               f"({M.DD_SUB} steps per month). Pinning Var X(T) across H means the "
+               f"sweep moves path shape, not scale.\nH is swept as a family "
+               f"parameter here, not calibrated: memory evidence gives H ~ 0.5 for "
+               f"S&P direction and 0.84-0.95 for its volatility.")
+    _save(fig, outfile, top=0.90)
+
+
+# ---------------------------------------------------------------------------
+# E7 -- the honesty panel (the headline)
+# ---------------------------------------------------------------------------
+def e7_point(h, m=8_000, reps=24, ref_paths=200_000, seed=707):
+    """One H of E7: truth, then both designs, each over `reps` full runs.
+
+    Seeded per-H rather than off one stream for the whole sweep, so a single
+    point can be re-run or added without moving any other point -- which is
+    what makes the robustness sweep in `e7`'s docstring a comparison rather
+    than a reshuffle.
+    """
+    rng = np.random.default_rng(seed + int(round(h * 100)))
+    truth = float(np.percentile(
+        M.drawdown_replicates(h, ref_paths, rng, sub=M.DD_SUB), M.DD_LEVEL))
+    row = {"truth": truth}
+    for kind in ("replicate", "window"):
+        est, rep = [], []
+        for _ in range(reps):
+            s = (M.drawdown_replicates(h, m, rng, sub=1) if kind == "replicate"
+                 else M.drawdown_windows(h, m, rng))
+            est.append(np.percentile(s, M.DD_LEVEL))
+            rep.append(M.bootstrap_halfwidth(s, rng))
+        est = np.asarray(est)
+        rmse = float(np.sqrt(((est - truth) ** 2).mean()))
+        row[kind] = {"bias": float(est.mean() - truth), "sd": float(est.std(ddof=1)),
+                     "rmse": rmse, "reported": float(np.mean(rep)),
+                     "ratio": float(np.mean(rep) / (1.96 * rmse))}
+    return row
+
+
+def e7(hursts=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9), m=8_000, reps=24,
+       ref_paths=200_000, seed=707,
+       outfile=FIGURES / "interval_honesty.png"):
+    """Two ways to estimate E6's number, and the error bar each one reports.
+
+    Both designs get the SAME sample size `m` and the same estimand, so the
+    comparison is about structure and not about budget:
+
+      independent replicates -- `m` fresh simulated bankrolls, on the MONTHLY
+        grid, because that is the grid a simulator picks.  Unbiased sampling,
+        biased grid.
+
+      single-path windows -- one realized record at DAILY resolution, cut into
+        `m` consecutive windows.  Right grid, dependent sample.
+
+    Both report an iid bootstrap 95% half-width.  Against that we put the
+    half-width that would ACTUALLY have covered: 1.96 x the rmse of the
+    estimator around the truth, over `reps` independent runs of the whole
+    design.  Ratio 1 is an honest error bar; below 1 is overconfidence.
+
+    Robustness, because a crossing is the kind of result that is easy to tune
+    into existence. Sweeping m over 4k / 8k / 16k moves both curves DOWN --
+    at H = 0.5 the window design runs 1.07, 1.04, 0.74 -- but the crossing
+    stays put between H = 0.6 and 0.7 throughout. So the location is a
+    property of the family and the level is a property of the budget: more
+    data does not buy honesty here, it spends it, which is E5's finding
+    arriving again through a completely different door.
+
+    Cost note: this is the expensive experiment in the file (~4 min), because
+    the window design needs a fresh multi-million-step record per rep.
+    """
+    _banner("E7", "the honesty panel -- reported half-width over actual error")
+    one_in = round(100.0 / (100.0 - M.DD_LEVEL))
+    print(f"Estimand: the 1-in-{one_in:,} drawdown of E6, "
+          f"{M.DD_HORIZON}-month horizon.")
+    print(f"Both designs get m = {m:,} observations; {reps} reps each; "
+          f"truth from {ref_paths:,} daily-grid paths.\n")
+    print(f"  {'H':>5} {'truth':>8} | {'repl bias':>10} {'rmse':>8} {'reported':>9} "
+          f"{'RATIO':>6} | {'win bias':>9} {'rmse':>8} {'reported':>9} {'RATIO':>6}")
+
+    res = {"h": [], "replicate": [], "window": [], "bias": {}, "truth": []}
+    for h in hursts:
+        row = e7_point(h, m=m, reps=reps, ref_paths=ref_paths, seed=seed)
+        for kind in ("replicate", "window"):
+            res[kind].append(row[kind]["ratio"])
+        res["h"].append(h)
+        res["truth"].append(row["truth"])
+        res["bias"][h] = row
+        truth = row["truth"]
+        r, w = row["replicate"], row["window"]
+        print(f"  {h:5.1f} {truth:8.4f} | {r['bias']:+10.4f} {r['rmse']:8.4f} "
+              f"{r['reported']:9.4f} {r['ratio']:6.2f} | {w['bias']:+9.4f} "
+              f"{w['rmse']:8.4f} {w['reported']:9.4f} {w['ratio']:6.2f}")
+
+    print("\nThe replicate design fails on the LEFT: its error bar measures sampling")
+    print("noise, and its error is discretization bias, which no extra path removes.")
+    print("The window design fails on the RIGHT: its grid is right and its sample is")
+    print("dependent, so the bootstrap divides by an m it does not really have.")
+    print("Each is honest only where the other is not, and they cross at H ~ 0.65.")
+    print("Sweeping m over 4k/8k/16k moves both curves down and leaves the crossing")
+    print("where it is: more data does not buy honesty here, it spends it.")
+
+    if PLOTS:
+        _e7_figure(res, m, reps, outfile)
+    return res
+
+
+def _e7_figure(res, m, reps, outfile):
+    """One panel, two curves, one honest line at 1.
+
+    Log y: the failures are multiplicative and run from ~0.1x to ~1x, so a
+    linear axis would compress the entire left-hand failure into the bottom
+    tenth of the frame and draw "8x overconfident" as indistinguishable from
+    "3x overconfident".
+    """
+    plt = _mpl()
+    fig, ax = plt.subplots(1, 1, figsize=(9.4, 6.2))
+    h = np.asarray(res["h"])
+    rep, win = np.asarray(res["replicate"]), np.asarray(res["window"])
+
+    ax.set_yscale("log")
+    ax.set_xlim(h[0] - 0.035, h[-1] + 0.035)
+    ax.set_ylim(0.05, 2.4)
+    # Shade below the honest line rather than annotating "overconfident" twice:
+    # once the reader knows which side is bad, every crossing reads itself.
+    ax.axhspan(0.05, 1.0, color=GRID, alpha=0.35, lw=0)
+    ax.axhline(1.0, color=INK, ls="--", lw=1.5)
+
+    # The measured exponent for S&P direction, from docs/memory_evidence.md.
+    # it is where a reader actually stands, and both designs are wrong there.
+    ax.axvline(0.49, color=MUTED, ls=":", lw=1.4)
+    ax.annotate("S&P direction,\nmeasured", (0.49, 0.058),
+                xycoords=("data", "data"), textcoords="offset points",
+                xytext=(-7, 0), ha="right", va="bottom", fontsize=8.2,
+                color=MUTED, multialignment="right")
+
+    ax.plot(h, rep, "o-", color=BLUE, ms=6)
+    ax.plot(h, win, "o-", color=ORANGE, ms=6)
+    ax.annotate("single-path windows\n(daily grid)", (h[0], win[0]),
+                textcoords="offset points", xytext=(9, 5), va="bottom",
+                fontsize=9, color=ORANGE, fontweight="semibold")
+    ax.annotate("independent replicates\n(monthly grid)", (h[0], rep[0]),
+                textcoords="offset points", xytext=(9, -3), va="top",
+                fontsize=9, color=BLUE, fontweight="semibold")
+    ax.text(h[-1] + 0.02, 1.06, "honest", fontsize=8.4, color=INK,
+            ha="right", va="bottom")
+
+    ax.set_xlabel("Hurst exponent $H$ of the bankroll")
+    ax.set_ylabel("reported half-width / the one that would cover (log scale)")
+    _grid(ax, axis="both")
+    _title(ax, "Each design is honest only where the other is not")
+
+    _suptitle(fig, "E7  Neither error bar knows which half of the family it is in",
+              "The same estimand and the same sample size, estimated two ways. "
+              "Below the line is overconfidence.")
+    _note(fig, f"m = {m:,} observations per estimate for BOTH designs, {reps} "
+               f"independent runs per point; reported bar is an iid bootstrap 95% "
+               f"half-width, verified calibrated on iid draws (T9).\nActual = 1.96 x "
+               f"rmse around the truth, so bias counts. Windows are non-overlapping, "
+               f"which is the charitable case: at H = 1/2 they are exactly iid.")
+    _save(fig, outfile, top=0.90)
+
+
+# ---------------------------------------------------------------------------
+# E8 -- the original question, unified
+# ---------------------------------------------------------------------------
+def e8(trials=250, budget=16_384, horizon=256, strategy_paths=40_000,
+       strategy_horizon=120, outfile=FIGURES / "unified_comparison.png"):
+    """Price and run one tail hedge under fat tails and transient memory."""
+    _banner("E8", "fat tails + transient memory + tail-hedge pricing")
+    truth = M.tail_put_truth_and_cv()
+    print(f"Q price of one {M.RS_K:.0%}-strike monthly put ... {truth['price']:.8f}")
+    print(f"physical jump probability ................. {M.RS_LAM_P:.3%}")
+    print(f"risk-neutral jump probability ............. {M.RS_LAM_Q:.3%}")
+    print(f"IS proposal jump probability .............. {M.RS_LAM_IS:.1%}")
+    print(f"finite memory cutoff ...................... {M.MEM_CUTOFF} months")
+    print(f"pricing budget ............................ {budget:,} month-observations/run")
+    print(f"pricing horizon ........................... {horizon:,} months/path\n")
+
+    regimes = (
+        (0.1, "rough H=.1"),
+        (0.5, "Brownian H=.5"),
+        (0.8, "persistent H=.8"),
+        ((0.1, 0.8), "alternating .1/.8"),
+    )
+    methods = ("crude", "cv", "is", "cv_is")
+    labels = {"crude": "crude MC", "cv": "+ crash control",
+              "is": "+ importance sampling", "cv_is": "+ control + IS"}
+    pricing, strategy = {}, {}
+
+    print("PRICING UNDER Q -- same truth and same compute budget")
+    print(f"  {'regime':>18} {'method':>23} {'mean':>11} {'bias/SE':>9} "
+          f"{'sd':>11} {'variance reduction':>19}")
+    for i, (h, regime_label) in enumerate(regimes):
+        rng = np.random.default_rng(8080 + i)
+        draws = M.run_price_trials(rng, trials, budget, horizon, h)
+        base_var = draws["crude"].var(ddof=1)
+        pricing[regime_label] = {}
+        for name in methods:
+            x = draws[name]
+            sd = x.std(ddof=1)
+            z = (x.mean() - truth["price"]) / (sd / np.sqrt(trials))
+            vr = base_var / x.var(ddof=1)
+            pricing[regime_label][name] = {
+                "mean": float(x.mean()), "sd": float(sd), "z": float(z),
+                "vr": float(vr),
+            }
+            print(f"  {regime_label:>18} {labels[name]:>23} {x.mean():11.8f} "
+                  f"{z:+9.2f} {sd:11.8f} {vr:18.2f}x")
+
+    print("\nMEMORY CROSSOVER -- exact from the block-reset covariance")
+    for h in M.REGIME_H:
+        local_n = np.array([4, 8, 16, 32])
+        long_n = M.MEM_CUTOFF * np.array([8, 16, 32, 64])
+        local_v = np.array([M.regime_sum_variance(h, int(n)) for n in local_n])
+        long_v = np.array([M.regime_sum_variance(h, int(n)) for n in long_n])
+        h_local = np.polyfit(np.log(local_n), np.log(local_v), 1)[0] / 2
+        h_long = np.polyfit(np.log(long_n), np.log(long_v), 1)[0] / 2
+        print(f"  local H={h:.1f}: measured locally {h_local:.3f}, "
+              f"measured beyond cutoff {h_long:.3f}")
+
+    print("\nROLLING HEDGE UNDER P -- premiums priced conditionally under Q")
+    print(f"  {'regime':>18} {'mean edge/mo':>14} {'P(hedge wins)':>15} "
+          f"{'99% DD unhedged':>18} {'99% DD hedged':>15}")
+    for i, (h, regime_label) in enumerate(regimes):
+        rng = np.random.default_rng(8180 + i)
+        paths = M.tail_hedge_strategy_paths(
+            rng, strategy_paths, strategy_horizon, h
+        )
+        edge = paths["difference"].mean() / strategy_horizon
+        win = (paths["difference"] > 0).mean()
+        dd_u = float(np.percentile(M.wipeout(paths["drawdown_unhedged"]), 99))
+        dd_h = float(np.percentile(M.wipeout(paths["drawdown_hedged"]), 99))
+        strategy[regime_label] = {
+            "edge": float(edge), "win": float(win),
+            "dd_u": dd_u, "dd_h": dd_h,
+        }
+        print(f"  {regime_label:>18} {edge:+14.6f} {win:14.2%} "
+              f"{dd_u:17.2f}% {dd_h:14.2f}%")
+
+    print("\nVariance reduction makes the Q price cheaper to estimate; it does not make")
+    print("the hedge profitable under P. Here Q assigns more crash mass than P, so the")
+    print("rolling hedge buys a tail-risk premium: it can reduce extreme drawdown while")
+    print("retaining negative mean carry.")
+
+    result = {"truth": truth, "pricing": pricing, "strategy": strategy}
+    if PLOTS:
+        _e8_figure(result, regimes, budget, horizon, outfile)
+    return result
+
+
+def _e8_figure(result, regimes, budget, horizon, outfile):
+    plt = _mpl()
+    fig, axes = plt.subplots(1, 3, figsize=(16.5, 5.0))
+    ax1, ax2, ax3 = axes
+
+    ns = np.unique(np.logspace(0, np.log10(M.MEM_CUTOFF * 64), 90).astype(int))
+    for h, color in zip(M.REGIME_H, (ORANGE, INK, BLUE)):
+        var = np.array([M.regime_sum_variance(h, int(n)) for n in ns])
+        ax1.loglog(ns, var, color=color, lw=2.2, label=f"local H = {h:.1f}")
+    ax1.axvline(M.MEM_CUTOFF, color=MUTED, ls=":", lw=1.5)
+    ax1.text(M.MEM_CUTOFF * 1.08, ax1.get_ylim()[0] * 1.7, "memory cutoff",
+             color=MUTED, fontsize=9)
+    ax1.set_xlabel("aggregation horizon, months")
+    ax1.set_ylabel("Var(sum of volatility driver)")
+    _title(ax1, "A. Local scaling, long-run H = 1/2")
+    ax1.legend(frameon=False, fontsize=9)
+    _grid(ax1, axis="both", which="both")
+
+    regime_labels = [label for _, label in regimes]
+    x = np.arange(len(regime_labels))
+    names = ("crude", "cv", "is", "cv_is")
+    labs = ("crude MC", "+ crash control", "+ IS", "+ control + IS")
+    colors = (MUTED, ORANGE, BLUE, VIOLET)
+    width = 0.19
+    for j, (name, lab, color) in enumerate(zip(names, labs, colors)):
+        y = [result["pricing"][r][name]["vr"] for r in regime_labels]
+        ax2.bar(x + (j - 1.5) * width, y, width, color=color, label=lab)
+    ax2.axhline(1.0, color=INK, ls="--", lw=1.2)
+    ax2.set_yscale("log")
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(("H=.1", "H=.5", "H=.8", ".1/.8"))
+    ax2.set_ylabel("variance reduction vs crude MC")
+    ax2.set_xlabel("local volatility regime")
+    _title(ax2, "B. Same Q price, four estimators")
+    ax2.legend(frameon=False, fontsize=8, loc="upper left")
+    _grid(ax2)
+
+    dd_u = [result["strategy"][r]["dd_u"] for r in regime_labels]
+    dd_h = [result["strategy"][r]["dd_h"] for r in regime_labels]
+    ax3.bar(x - 0.18, dd_u, 0.36, color=INK, label="unhedged")
+    ax3.bar(x + 0.18, dd_h, 0.36, color=ORANGE, label="rolling hedge")
+    for i, r in enumerate(regime_labels):
+        win = result["strategy"][r]["win"]
+        edge = result["strategy"][r]["edge"]
+        ax3.text(i, max(dd_u[i], dd_h[i]) + 1.5,
+                 f"win {win:.0%}\nedge {edge:+.1e}/mo", ha="center", fontsize=8)
+    ax3.set_ylim(0, max(dd_u) + 13)
+    ax3.set_xticks(x)
+    ax3.set_xticklabels(("H=.1", "H=.5", "H=.8", ".1/.8"))
+    ax3.set_ylabel("99th-percentile max drawdown (% wealth)")
+    ax3.set_xlabel("local volatility regime")
+    _title(ax3, "C. Q price versus P bankroll outcome")
+    ax3.legend(frameon=False, fontsize=9)
+    _grid(ax3)
+
+    _suptitle(fig, "E8  The unified experiment",
+              "Fat tails, transient market memory, a Q-priced rolling tail hedge, and equal-budget Monte Carlo.")
+    _note(fig, f"Pricing truth {result['truth']['price']:.8f}; {budget:,} month-observations per run, "
+               f"{horizon}-month paths. Memory is in volatility and resets after {M.MEM_CUTOFF} months, "
+               "so local H can differ from 1/2 without asserting permanent anomalous scaling. "
+               f"Q crash probability {M.RS_LAM_Q:.3%} vs P {M.RS_LAM_P:.3%}.")
+    _save(fig, outfile, top=0.86)
 
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 EXPERIMENTS = {
-    "e1": (e1, "the median lies -> e1_median_lies.png"),
-    "e2": (e2, "variance diagnosis -> e2_variance_diagnosis.png"),
-    "e3": (e3, "convergence figure -> mc_estimator_convergence.png"),
-    "e4": (e4, "path functionals -> e4_path_functionals.png"),
-    "e5": (e5, "the error bar lies -> e5_error_bar_lies.png"),
+    "e1": (e1, "rare payoff -> figures/rare_payoff.png"),
+    "e2": (e2, "variance methods -> figures/variance_methods.png"),
+    "e3": (e3, "convergence -> figures/convergence.png"),
+    "e4": (e4, "bankroll paths -> figures/bankroll_paths.png"),
+    "e5": (e5, "memory error bars -> figures/memory_error_bars.png"),
+    "e6": (e6, "drawdown by H -> figures/drawdown_by_hurst.png"),
+    "e7": (e7, "interval honesty -> figures/interval_honesty.png  (~4 min)"),
+    "e8": (e8, "unified comparison -> figures/unified_comparison.png"),
 }
 
 

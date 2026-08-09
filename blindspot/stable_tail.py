@@ -1,6 +1,9 @@
 """
-Corrected reference for Calculation.py. Exists to prove the diagnosis, not to
-replace the original. Each fix is annotated with the test it turns green.
+Corrected reference for the exploratory α-stable option script (`Calculation.py`),
+which was retired in the rebuild along with its audit note and test file. This
+file is the surviving half: it exists to record the diagnosis, not to be used.
+Nothing in the project imports it, and the T/B labels below refer to that retired
+test file, not to `test_regressions.py`.
 
 The central change is not a bug fix: for alpha < 2 the exponential-stable model
 has E[S_T] = infinity unless beta = -1, so `martingale_condition` is asking for

@@ -2,12 +2,12 @@
 test_regressions.py -- the bugs and the verified numbers, encoded so they cannot
 return.
 
-    python test_regressions.py        # standalone, no pytest needed
-    pytest test_regressions.py        # also works if pytest is installed
+    python -m tests.test_regressions  # standalone, no pytest needed
+    pytest tests/test_regressions.py  # if pytest is installed
 
 Two kinds of test live here and they are labelled separately.
 
-  T1-T7  Verified numbers. These are the acceptance tests: quantities that were
+  T1-T15 Verified numbers. These are the acceptance tests: quantities that were
          computed, checked against an independent route where one existed, and
          recorded. A failure means a result moved.
 
@@ -24,17 +24,18 @@ absolute terms.
 
 from __future__ import annotations
 
+import inspect
 import pathlib
 import sys
 
 import numpy as np
 from scipy import integrate, stats
 
-import model as M
+from blindspot import model as M
 
 
 # ===========================================================================
-# T1-T7 -- verified numbers
+# T1-T15 -- verified numbers
 # ===========================================================================
 def test_t1_density_matches_sampler():
     """T1: the density and the sampler are written independently -- do they agree?
@@ -188,6 +189,291 @@ def test_t7_root_n_convergence(trials=400):
     return "slopes: " + ", ".join(out)
 
 
+def test_t8_davies_harte_matches_cholesky():
+    """T8: the fast fGn driver has the same law as the exact slow one.
+
+    E6/E7 need paths of millions of steps, which Cholesky cannot reach, so the
+    drawdown family runs on Davies-Harte instead. Two things are checked, and
+    the second is the one that matters: the empirical covariance matches the
+    fGn autocovariance, AND the covariance the circulant actually implements
+    -- after the negative-eigenvalue clip -- is within 1e-3 of the true one at
+    the largest record E7 draws. The clip is where an approximation could
+    enter unnoticed, so it is measured deterministically rather than sampled.
+    """
+    rng = np.random.default_rng(31)
+    h, n = 0.75, 24
+    x = M.fgn_davies_harte(h, n, 120_000, rng)
+    k = np.arange(n, dtype=float)
+    gamma = 0.5 * ((k + 1) ** (2 * h) - 2 * k ** (2 * h) + np.abs(k - 1) ** (2 * h))
+    theo = gamma[np.abs(np.subtract.outer(np.arange(n), np.arange(n)))]
+    err = np.abs(np.cov(x, rowvar=False) - theo).max()
+    assert err < 0.02, f"empirical covariance off by {err:.4f}"
+
+    # What the clipped circulant really implements, at E7's record length.
+    big_h, big_n = 0.9, M.DD_HORIZON * M.DD_SUB * 8_000
+    m = 1 << int(np.ceil(np.log2(big_n)))
+    kk = np.arange(m + 1, dtype=float)
+    g = 0.5 * ((kk + 1) ** (2 * big_h) - 2 * kk ** (2 * big_h)
+               + np.abs(kk - 1) ** (2 * big_h))
+    lam = np.fft.rfft(np.concatenate([g, g[-2:0:-1]])).real
+    implied = np.fft.irfft(np.clip(lam, 0.0, None), n=2 * m)
+    drift = max(abs(implied[lag] - g[lag]) for lag in (0, 1, 10, 100, 1000))
+    assert drift < 1e-3, f"clipped circulant covariance off by {drift:.2e}"
+    return f"cov err {err:.4f}, clip drift {drift:.1e}"
+
+
+def test_t9_bootstrap_is_calibrated_on_iid():
+    """T9: E7's reported error bar is fair before the experiment indicts it.
+
+    E7's whole claim is that the ratio reported/actual departs from 1. That is
+    only a finding if the ratio IS 1 when the design's assumptions hold, so
+    this checks the bootstrap against the realized sd of the estimator on
+    genuinely iid draws, at both grids E7 uses. Measured 1.0-1.3x at this rep
+    count, and 0.9-1.1x at 80 reps -- the spread is sd-of-sd noise, not
+    miscalibration, and the band below is set to the rep count. Without
+    this the honest line at 1.0 would be an assumption, and both of E7's
+    failures could be one miscalibrated bootstrap wearing two hats.
+    """
+    rng = np.random.default_rng(32)
+    out = []
+    for h, sub in ((0.3, 1), (0.8, M.DD_SUB)):
+        est, se = [], []
+        for _ in range(40):
+            s = M.drawdown_replicates(h, 4_000, rng, sub=sub)
+            est.append(np.percentile(s, M.DD_LEVEL))
+            se.append(M.bootstrap_halfwidth(s, rng, boot=200) / 1.96)
+        ratio = np.mean(se) / np.std(est, ddof=1)
+        assert 0.7 < ratio < 1.4, f"H={h} sub={sub}: bootstrap/true sd = {ratio:.2f}"
+        out.append(f"H={h} {ratio:.2f}x")
+    return "bootstrap/true sd: " + ", ".join(out)
+
+
+def test_t10_drawdown_family_is_ordered_and_pinned():
+    """T10: E6's sweep moves path shape, not scale.
+
+    Two claims the E6 figure makes structurally. Terminal variance is pinned
+    across H by construction, so if it drifts the family is really a
+    volatility sweep and the drawdown ordering means nothing. And the 1-in-1000
+    drawdown must be monotone decreasing in H: rougher paths spend the same
+    terminal variance on deeper round trips. Guards the case where someone
+    "fixes" the sigma_H = DD_SIGMA_T / T^H scaling and quietly turns E6 into a
+    plot of its own normalization.
+    """
+    rng = np.random.default_rng(33)
+    var, reads = [], []
+    for h in (0.2, 0.5, 0.8):
+        inc = M.fgn_davies_harte(h, M.DD_HORIZON, 40_000, rng)
+        var.append(M._fbm_wealth(h, inc, 1)[:, -1].var())
+        reads.append(np.percentile(M.drawdown_replicates(h, 40_000, rng,
+                                                         sub=M.DD_SUB), M.DD_LEVEL))
+    target = M.DD_SIGMA_T ** 2
+    for h, v in zip((0.2, 0.5, 0.8), var):
+        assert abs(v / target - 1) < 0.12, f"H={h}: Var X(T) = {v:.4f} vs {target:.4f}"
+    assert reads[0] > reads[1] > reads[2], f"1-in-1000 not ordered in H: {reads}"
+    return (f"Var X(T) pinned at {target:.4f}; 1-in-1000 "
+            + " > ".join(f"{M.wipeout(r):.0f}%" for r in reads))
+
+
+def _dh_spectrum(hurst, n_steps):
+    """The Davies-Harte half-spectrum and its bin multiplicities, as model.py builds it."""
+    m = 1 << int(np.ceil(np.log2(max(n_steps, 2))))
+    k = np.arange(m + 1, dtype=float)
+    g = 0.5 * ((k + 1) ** (2 * hurst) - 2 * k ** (2 * hurst)
+               + np.abs(k - 1) ** (2 * hurst))
+    lam = np.fft.rfft(np.concatenate([g, g[-2:0:-1]])).real
+    mult = np.full(lam.size, 2.0)
+    mult[0] = mult[-1] = 1.0
+    return m, lam, mult
+
+
+def test_t11_fgn_drivers_have_unit_variance():
+    """T11: Var(G_t) = 1 for both fGn drivers -- exactly, not approximately.
+
+    This is the quietest load-bearing assumption in the project. E5's truth
+    line is the CLOSED FORM `lrd_g_true` = mu_a - 0.5*sbar^2*exp(2*xi^2), and
+    that expression is only the true growth rate because Var(G_t) = 1 makes
+    E[sigma_t^2] = SBAR^2 exp(2 XI^2). E6/E7 lean on it again: the whole point
+    of sigma_H = DD_SIGMA_T / T^H is that Var X(T) is the same for every H, and
+    a driver whose variance drifted with H would turn E6 into a plot of its own
+    normalization -- the exact failure T10 guards from the other side. A driver
+    that was off by 3% would not look broken anywhere; the truth line would
+    just sit in the wrong place and E5 would be indicting its own generator.
+
+    Unit variance is not a calibration here, it is an identity. The filter
+    Davies-Harte applies to iid unit normals is h = ifft(sqrt(lam)), so by
+    Parseval Var(y_t) = sum_j h_j^2 = (1/2m) sum_k lam_k, and the eigenvalues
+    of a circulant sum to 2m times its first row entry, which is gamma(0) = 1.
+    So the check below is at 1e-12, not at an MC tolerance: anything looser
+    would pass a generator that had picked up a scale factor.
+
+    The one thing that can break the identity is the negative-eigenvalue clip,
+    and the same algebra prices it: clipping removes negative mass, so it
+    raises the variance to exactly 1 + `lost`. Two consequences are asserted,
+    both of which were wrong or unstated before this test existed.
+
+      * The clip inflates variance, it does not shrink it. Guards against
+        "fix" the sign of the correction.
+      * `lost` must be measured over the FULL 2m spectrum. The original code
+        divided the half-spectrum's negative sum by the half-spectrum's total;
+        both halves of that ratio were wrong and they did not cancel, so the
+        gate read 4.5e-2 where the true variance error was 5.4e-2 -- an ~18%
+        UNDER-statement, i.e. the permissive direction, in the one number
+        standing between E7 and a silently wrong long-range structure. No run
+        changed status when it was fixed (H=0.9/4M steps passes either way at
+        3.6e-4 vs 3.8e-4, H=0.95/4M fails either way), which is why it went
+        unnoticed and why it is pinned here rather than left to a rerun.
+    """
+    # --- Davies-Harte: deterministic, at every (H, n) any experiment uses ---
+    worst = 0.0
+    for h in (0.2, 0.3, 0.5, 0.7, 0.8, 0.9):
+        for n in (M.DD_HORIZON, M.DD_HORIZON * M.DD_SUB, 4096,
+                  M.DD_HORIZON * M.DD_SUB * 8_000):
+            m, lam, _ = _dh_spectrum(h, n)
+            assert (lam >= 0).all(), f"H={h}, n={n:,}: clip active where it should not be"
+            var = np.fft.irfft(lam, n=2 * m)[0]
+            worst = max(worst, abs(var - 1.0))
+    assert worst < 1e-12, f"Davies-Harte Var(G) off by {worst:.2e}"
+
+    # --- Cholesky: same identity, different route ---
+    for h in (0.2, 0.5, 0.9):
+        chol = M.fgn_cholesky(h, 512)
+        diag = (chol @ chol.T).diagonal()
+        off = np.abs(diag - 1.0).max()
+        assert off < 1e-8, f"Cholesky H={h}: Var(G) off by {off:.2e} (ridge is 1e-10)"
+
+    # --- the clip: inflates variance by exactly the discarded mass ---
+    m, lam, mult = _dh_spectrum(0.95, 4_000_000)
+    assert (lam < 0).any(), "H=0.95 at 4M steps no longer clips; the case moved"
+    lost = -(mult * lam)[lam < 0].sum() / (2 * m)
+    var = np.fft.irfft(np.clip(lam, 0.0, None), n=2 * m)[0]
+    assert var > 1.0, f"clip must raise variance, got {var:.6f}"
+    assert abs((var - 1.0) - lost) < 1e-12 * lost, \
+        f"variance error {var - 1.0:.6e} != discarded mass {lost:.6e}"
+    assert abs(lost - 5.396e-2) < 1e-5, f"lost = {lost:.4e}, expected 5.396e-2"
+
+    # The half-spectrum version this replaced, kept so the bug cannot return.
+    naive = -lam[lam < 0].sum() / lam.sum()
+    assert naive < lost, "the half-spectrum ratio understated the loss; that was the bug"
+    psd_tol = inspect.signature(M.fgn_davies_harte).parameters["psd_tol"].default
+    assert lost > psd_tol, f"this case must trip psd_tol = {psd_tol}"
+
+    # --- and the gate actually fires ---
+    rng = np.random.default_rng(35)
+    try:
+        M.fgn_davies_harte(0.95, 4_000_000, 1, rng)
+    except ValueError as exc:
+        assert "lost" in str(exc)
+    else:
+        raise AssertionError("psd_tol gate did not fire at H=0.95, 4M steps")
+
+    # --- empirical, as a sanity check on the whole call path ---
+    emp = []
+    for h in (0.2, 0.5, 0.9):
+        x = M.fgn_davies_harte(h, 64, 40_000, rng)
+        v = x.var(axis=0).mean()          # per-column, then averaged
+        se = np.sqrt(2.0 / x.shape[0])    # columns are dependent: no sqrt(n) gain
+        assert abs(v - 1.0) < 4 * se, f"H={h}: empirical var {v:.4f} ({se:.4f} se)"
+        emp.append(v)
+
+    return (f"Var(G)=1 to {worst:.0e} (deterministic); clip at H=0.95/4M "
+            f"inflates by {lost:.3e}; empirical {min(emp):.4f}-{max(emp):.4f}")
+
+
+def test_t12_transient_memory_crosses_to_half():
+    """T12: E8 has the requested local H but ordinary long-run scaling.
+
+    A constant-H process cannot satisfy both requirements.  E8 resets exact
+    fGn after a finite regime length, making the variance identity available
+    without Monte Carlo: n^(2H) locally and O(n) after many independent blocks.
+    """
+    local_n = np.array([4, 8, 16, 32])
+    long_n = M.MEM_CUTOFF * np.array([8, 16, 32, 64])
+    out = []
+    for h in M.REGIME_H:
+        lv = np.array([M.regime_sum_variance(h, int(n)) for n in local_n])
+        gv = np.array([M.regime_sum_variance(h, int(n)) for n in long_n])
+        local = np.polyfit(np.log(local_n), np.log(lv), 1)[0] / 2
+        long = np.polyfit(np.log(long_n), np.log(gv), 1)[0] / 2
+        assert abs(local - h) < 1e-12, (h, local)
+        assert abs(long - 0.5) < 1e-12, (h, long)
+        out.append(f"{h:.1f}->{long:.1f}")
+
+    # Alternating rough/persistent blocks must also aggregate diffusively.
+    mixed_n = M.MEM_CUTOFF * np.array([16, 32, 64, 128])
+    mixed_v = np.array([
+        M.regime_sum_variance((0.1, 0.8), int(n)) for n in mixed_n
+    ])
+    mixed = np.polyfit(np.log(mixed_n), np.log(mixed_v), 1)[0] / 2
+    assert abs(mixed - 0.5) < 1e-12, mixed
+    return "local->long H: " + ", ".join(out) + f", alternating->{mixed:.1f}"
+
+
+def test_t13_q_price_has_an_independent_oracle():
+    """T13: analytic conditional pricing agrees with density quadrature."""
+    sigma = M.RS_SBAR
+    m = float(M.regime_market_drift(sigma, "Q"))
+    k = np.log(M.RS_K)
+    kp = M.RS_BETA / sigma
+
+    def density(r):
+        bulk = stats.norm.pdf(r, m, sigma)
+        jump = stats.exponnorm.pdf(-r, kp, loc=-m, scale=sigma)
+        return (1 - M.RS_LAM_Q) * bulk + M.RS_LAM_Q * jump
+
+    raw, err = integrate.quad(
+        lambda r: (M.RS_K - np.exp(r)) * density(r), -40.0, k, limit=1500
+    )
+    oracle = np.exp(-M.RS_RF) * raw
+    analytic = float(M.conditional_tail_put_price(sigma))
+    assert abs(analytic - oracle) < 20 * err + 1e-11, (analytic, oracle, err)
+
+    # The outer volatility quadrature must be stable, and Q's discounted
+    # underlying expectation is pinned to one by construction.
+    a = M.tail_put_truth_and_cv(24)
+    b = M.tail_put_truth_and_cv(48)
+    assert abs(a["price"] - b["price"]) < 2e-8, (a, b)
+    assert abs(b["underlying"] - 1.0) < 1e-14
+    return (f"conditional {analytic:.8f} vs density quad {oracle:.8f}; "
+            f"unconditional Q price {b['price']:.8f}")
+
+
+def test_t14_e8_estimators_are_unbiased_and_reduce_variance():
+    """T14: all four E8 estimators target one Q price at one compute budget."""
+    rng = np.random.default_rng(8083)
+    truth = M.tail_put_truth_and_cv()["price"]
+    out = M.run_price_trials(
+        rng, trials=400, budget=8_192, horizon=256, local_h=(0.1, 0.8)
+    )
+    base = out["crude"].var(ddof=1)
+    ratios, zs = {}, {}
+    for name, x in out.items():
+        sd = x.std(ddof=1)
+        z = (x.mean() - truth) / (sd / np.sqrt(len(x)))
+        assert abs(z) < 4.0, f"{name}: bias {z:+.2f} MC-SE"
+        ratios[name] = base / x.var(ddof=1)
+        zs[name] = z
+    assert ratios["cv"] > 1.15, ratios
+    assert ratios["is"] > 3.0, ratios
+    assert ratios["cv_is"] > 3.0, ratios
+    return ("bias/SE " + ", ".join(f"{k} {zs[k]:+.1f}" for k in out)
+            + f"; VR cv/is/both {ratios['cv']:.1f}/{ratios['is']:.1f}/"
+              f"{ratios['cv_is']:.1f}x")
+
+
+def test_t15_q_priced_hedge_reduces_tail_but_costs_carry():
+    """T15: estimator efficiency is kept separate from the economic result."""
+    rng = np.random.default_rng(8183)
+    paths = M.tail_hedge_strategy_paths(
+        rng, n_paths=30_000, horizon=120, local_h=(0.1, 0.8)
+    )
+    edge = paths["difference"].mean() / 120
+    dd_u = np.percentile(M.wipeout(paths["drawdown_unhedged"]), 99)
+    dd_h = np.percentile(M.wipeout(paths["drawdown_hedged"]), 99)
+    assert edge < 0, edge
+    assert dd_h < dd_u - 1.0, (dd_u, dd_h)
+    return f"edge {edge:+.2e}/mo; 99% drawdown {dd_u:.1f}% -> {dd_h:.1f}%"
+
+
 # ===========================================================================
 # B1-B5 -- committed bugs
 # ===========================================================================
@@ -211,10 +497,8 @@ def test_b1_no_student_t_scale_switch():
     back into the codebase, and separately re-demonstrates the discontinuity so
     the reasoning behind the ban stays on the record.
     """
-    src_dir = pathlib.Path(__file__).parent
+    src_dir = pathlib.Path(__file__).resolve().parents[1] / "blindspot"
     for path in sorted(src_dir.glob("*.py")):
-        if path.name == pathlib.Path(__file__).name:
-            continue        # this file names the bug in order to document it
         text = path.read_text()
         for marker in ("standard_t", "stats.t.", "nu - 2", "nu-2"):
             assert marker not in text, f"Student-t model reappeared in {path.name}"
