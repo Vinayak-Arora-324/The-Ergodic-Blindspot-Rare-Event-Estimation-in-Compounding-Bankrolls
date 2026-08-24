@@ -1,24 +1,17 @@
-"""Motivating measurement: where the long memory in the S&P 500 actually lives.
+"""Check whether S&P 500 returns or volatility show a lasting pattern.
 
     python -m blindspot.sp500_memory            # fetch, estimate, write figure
     python -m blindspot.sp500_memory --no-download
 
-The project's fGn driver takes a Hurst exponent H as a free parameter.  This
-script is the empirical reason that parameter is not a toy: on 36 years of
-S&P 500 data, log returns are indistinguishable from memoryless, while the
-volatility proxy |r| has H ~ 0.8.  That is exactly the structure model.py
-already encodes (log sigma_t = log SBAR + XI * G_t with G fGn), so the model
-is calibrated to a real stylized fact rather than assumed into existence.
+The model uses the Hurst exponent `H` to control volatility memory. On roughly
+36 years of S&P 500 data, return direction is close to memoryless, while large
+and small moves cluster over time. This supports putting memory in volatility
+rather than using it to predict whether the market rises or falls next.
 
-Getting that answer requires one non-obvious control.  The naive null --
-shuffle the returns -- destroys volatility clustering along with everything
-else, so it rejects on any equity series and says nothing about memory in
-the *direction* of returns.  The null used here instead randomises only the
-signs, r* = +-|r_t|, preserving the |r| sequence exactly.  Under the naive
-null the returns look significantly anti-persistent (p < 0.01); under the
-correct one that mostly evaporates, while |r| stays overwhelming.  Which
-null you pick changes the conclusion -- the same "is the reported
-uncertainty honest" problem this project studies, in miniature.
+The comparison keeps each return's size in its original position and randomly
+changes only its sign. This removes directional patterns without destroying
+calm and turbulent periods. Simply shuffling all returns would destroy both and
+could make ordinary volatility clustering look like directional memory.
 """
 
 import argparse
@@ -96,7 +89,7 @@ def load_prices(start, end, allow_download=True):
 # Estimation against a null that keeps volatility clustering intact
 # ---------------------------------------------------------------------------
 def sign_null(x, fn, n_rep, rng):
-    """H_hat on r* = +-|r_t|: keeps the |r| sequence, kills directional memory."""
+    """Build a no-directional-memory baseline while preserving return sizes."""
     mag = np.abs(x)
     return np.array([fn(rng.choice([-1.0, 1.0], size=len(mag)) * mag)
                      for _ in range(n_rep)])
@@ -131,8 +124,8 @@ def analyse(x, n_rep, block, seed=0):
 
 def print_table(rows, label):
     print(f"\n{label}")
-    hdr = (f"{'estimator':>10} {'H_hat':>7} {'95% boot':>16} "
-           f"{'sign null':>15} {'z':>7} {'p':>7}")
+    hdr = (f"{'method':>10} {'H':>7} {'95% range':>16} "
+           f"{'no-memory range':>17} {'z':>7} {'p':>7}")
     print(hdr)
     print("-" * len(hdr))
     for r in rows:
@@ -165,9 +158,9 @@ def figure(returns, vol, rows_r, rows_v, path):
     ref = np.array(lags, dtype=float)
     ax1.loglog(ref, (ref / ref[0]) ** 0.5, "--", color="grey", lw=1.2,
                label="H = 0.5 (no memory)")
-    ax1.set_xlabel("window size s (trading days)")
-    ax1.set_ylabel("F(s), normalised")
-    ax1.set_title("DFA fluctuation scaling")
+    ax1.set_xlabel("window length (trading days)")
+    ax1.set_ylabel("relative size of fluctuations")
+    ax1.set_title("How fluctuations grow over longer windows")
     ax1.legend(fontsize=8, loc="upper left")
     ax1.grid(alpha=0.3, which="both")
 
@@ -191,8 +184,8 @@ def figure(returns, vol, rows_r, rows_v, path):
     ax2.axvline(0.5, color="grey", ls="--", lw=1.2)
     ax2.set_yticks(y)
     ax2.set_yticklabels(names)
-    ax2.set_xlabel("Hurst exponent")
-    ax2.set_title("estimate (dot, 95% bootstrap) vs sign null (shaded, ±2sd)")
+    ax2.set_xlabel("Hurst exponent (0.5 means no lasting pattern)")
+    ax2.set_title("estimate and 95% range vs no-directional-memory baseline")
     ax2.legend(fontsize=8, loc="upper left")
     ax2.grid(alpha=0.3, axis="x")
     ax2.set_ylim(-0.6, len(names) - 0.4)
@@ -219,22 +212,21 @@ def main():
 
     print(f"\n{TICKER}: {len(r)} log returns, "
           f"{prices.index[0].date()} to {prices.index[-1].date()}")
-    print(f"sd {r.std():.4f}  skew {pd.Series(r).skew():.2f}  "
-          f"kurtosis {pd.Series(r).kurt():.1f}")
+    print(f"daily spread (sd) {r.std():.4f}  asymmetry {pd.Series(r).skew():.2f}  "
+          f"tail weight (excess kurtosis) {pd.Series(r).kurt():.1f}")
 
     rows_r = analyse(r, args.reps, args.block)
     rows_v = analyse(vol, args.reps, args.block)
-    print_table(rows_r, "LOG RETURNS  (direction)")
-    print_table(rows_v, "ABSOLUTE RETURNS  (volatility proxy)")
+    print_table(rows_r, "LOG RETURNS (market direction)")
+    print_table(rows_v, "ABSOLUTE RETURNS (size of market moves)")
 
     figure(r, vol, rows_r, rows_v,
            os.path.abspath(os.path.join(
                HERE, "..", "figures", "market_memory.png")))
 
-    print("\nH_hat is compared with each estimator's own null, not with 0.5: "
-          "the\nnull is what that estimator returns on data with identical "
-          "marginals and\nidentical volatility clustering but no directional "
-          "memory, at this n.")
+    print("\nEach H estimate is compared with the same method applied to a focused")
+    print("no-directional-memory baseline. That baseline preserves the original")
+    print("return sizes and volatility clustering, and randomizes only their signs.")
 
 
 if __name__ == "__main__":

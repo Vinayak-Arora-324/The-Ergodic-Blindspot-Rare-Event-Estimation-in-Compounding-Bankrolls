@@ -1,26 +1,21 @@
-"""Hurst-exponent estimation from a price series.
+"""Estimate how strongly a price series depends on its past.
 
-INPUT CONTRACT (read this before calling anything here)
--------------------------------------------------------
-Every estimator in this module measures how a fluctuation statistic scales
-with window size, and every one of them must see the *cumulative profile*
-(the fBm-like path), not the increments (the fGn-like returns).
+The result is a Hurst exponent. A value near 0.5 means little lasting pattern,
+a value above 0.5 means changes tend to persist, and a value below 0.5 means
+they tend to reverse quickly.
 
-Textbook DFA/MFDFA/R-S descriptions bundle that integration step inside the
-estimator and are documented as taking increments; the implementations here
-historically did not integrate at all, so callers passing log-returns were
-measuring the roughness of the noise rather than the memory of the process.
-On synthetic fGn with true H = 0.75 that produced H_hat ~ 0.03-0.13.
+Important input rule
+--------------------
+These methods work on a cumulative path. Tell each function what you provide:
 
-The fix is an explicit contract rather than a convention.  Each estimator
-takes `input_type`:
+    input_type="increments"  (default) -- returns or other step-by-step changes;
+                                          the function builds the path for you.
+    input_type="profile"                -- an already cumulative path, such as
+                                          log price; it is used as provided.
 
-    input_type="increments"  (default) -- you are passing returns / fGn;
-                                          the estimator integrates for you.
-    input_type="profile"                -- you are passing a price level or
-                                          log-price path / fBm; used as-is.
-
-Pass whichever you actually have and the estimator does the right thing.
+Older code skipped this conversion, so passing returns measured the roughness
+of individual changes instead of the memory of the cumulative process. On test
+data with a true Hurst exponent of 0.75, that mistake produced 0.03–0.13.
 """
 
 import sys
@@ -37,7 +32,7 @@ PROFILE = "profile"
 
 
 def _as_profile(series, input_type):
-    """Coerce an input series to the cumulative profile the estimators need.
+    """Convert step-by-step changes into the cumulative path the methods need.
 
     Increments are demeaned before integration so that a nonzero drift does
     not add a deterministic linear trend to the profile.  (DFA detrends each
@@ -92,7 +87,7 @@ def _detrended_variance(window_matrix):
 # Variogram estimator (previously, and inaccurately, named hurst_rs)
 # ---------------------------------------------------------------------------
 def hurst_variogram(series, max_lag=50, input_type=INCREMENTS):
-    """Estimate H from the scaling of lagged increments of the profile.
+    """Estimate the Hurst exponent from changes over different time gaps.
 
     Despite its former name this is *not* rescaled-range analysis: there is
     no range, no rescaling by the running standard deviation, and no R/S
@@ -130,7 +125,7 @@ def hurst_rs(series, max_lag=50, input_type=INCREMENTS):
 # Detrended Fluctuation Analysis
 # ---------------------------------------------------------------------------
 def hurst_dfa(series, max_lag=50, input_type=INCREMENTS, return_curve=False):
-    """Estimate H by detrended fluctuation analysis.
+    """Estimate the Hurst exponent after removing local linear trends.
 
     F(s) = sqrt( mean over windows of the mean squared linear-detrended
     residual ) scales as s^H for a self-similar profile.
@@ -164,7 +159,7 @@ def hurst_dfa(series, max_lag=50, input_type=INCREMENTS, return_curve=False):
 # Higuchi fractal dimension
 # ---------------------------------------------------------------------------
 def higuchi_fd(series, k_max=10, input_type=INCREMENTS):
-    """Higuchi fractal dimension of the profile curve.
+    """Measure the roughness of the path with Higuchi's method.
 
     Higuchi's method measures the length of a *curve*, so it too needs the
     profile.  For fBm the relation to the Hurst exponent is FD = 2 - H, so a
@@ -204,7 +199,7 @@ def higuchi_fd(series, k_max=10, input_type=INCREMENTS):
 # Multifractal DFA
 # ---------------------------------------------------------------------------
 def mfdfa(series, q_list=range(-5, 6), max_lag=50, input_type=INCREMENTS):
-    """Generalised Hurst exponents h(q) by multifractal DFA.
+    """Estimate Hurst exponents separately for small and large fluctuations.
 
     h(2) coincides with the DFA exponent.  A flat h(q) across q indicates a
     monofractal process; curvature indicates multifractality.
@@ -254,7 +249,7 @@ def log_returns(prices):
 
 
 def predict_direction(prices, window=100, future_steps=5):
-    """Predict price direction from the locally estimated Hurst exponent."""
+    """Demonstrate a simple, experimental direction rule based on local H."""
     returns = log_returns(prices)
     recent_data = returns[-window:].values
 
@@ -280,15 +275,15 @@ def predict_direction(prices, window=100, future_steps=5):
 
 
 def report(prices):
-    """Print all estimates for a price level series."""
+    """Print all Hurst estimates for a price series."""
     returns = log_returns(prices).values
 
-    print("Variogram (structure function)")
-    print(f"  Hurst: {hurst_variogram(returns):.4f}")
-    print("Detrended Fluctuation Analysis (DFA)")
-    print(f"  Hurst: {hurst_dfa(returns):.4f}")
+    print("Hurst estimates (0.5 means no lasting pattern)")
+    print(f"  changes across time gaps (variogram): {hurst_variogram(returns):.4f}")
+    print(f"  after removing local trends (DFA):    {hurst_dfa(returns):.4f}")
     fd = higuchi_fd(returns)
-    print(f"Fractal Dimension (Higuchi): {fd:.4f}  -> implied H = {2 - fd:.4f}")
+    print(f"  path roughness (Higuchi):              {2 - fd:.4f} "
+          f"(roughness score {fd:.4f})")
 
 
 def load_prices(path):
@@ -305,7 +300,7 @@ if __name__ == "__main__":
         prices = load_prices(path)
         print(f"Loaded {len(prices)} prices from {path}\n")
     except FileNotFoundError:
-        print(f"{path} not found -- falling back to a synthetic random walk.\n")
+        print(f"{path} not found -- using a synthetic random walk instead.\n")
         # Geometric (multiplicative) walk: stays strictly positive, so the
         # log returns are well defined.  The additive walk used previously
         # crossed zero within ~1000 steps and produced NaNs.
@@ -316,4 +311,4 @@ if __name__ == "__main__":
     report(prices)
 
     H, direction = predict_direction(prices, window=200, future_steps=5)
-    print(f"\nHurst (q=2): {H:.3f} -> Predicted Direction: {direction}")
+    print(f"\nExperimental direction rule: H = {H:.3f}, result = {direction}")

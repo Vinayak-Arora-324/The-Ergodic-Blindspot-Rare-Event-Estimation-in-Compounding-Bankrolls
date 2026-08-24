@@ -1,66 +1,83 @@
-# Why H is a real parameter, not a modelling convenience
+# Why the model gives volatility a memory setting
 
-**Figure:** `figures/market_memory.png` · **Code:** `blindspot/sp500_memory.py` · **Data:** ^GSPC daily,
-1990-01-02 to 2026-07-31, 9,211 log returns (Yahoo Finance, split/dividend adjusted).
+**Figure:** `figures/market_memory.png` · **Code:** `blindspot/sp500_memory.py` ·
+**Data:** adjusted daily S&P 500 prices from 1990-01-02 to 2026-07-31 (9,211
+log returns, downloaded from Yahoo Finance).
 
-The model in `model.py` drives volatility with fractional Gaussian noise,
-`log sigma_t = log SBAR + XI * G_t` with `G` fGn of Hurst exponent `H`. That
-choice needs an empirical warrant, otherwise `H` is just a knob that makes the
-drawdown tail move.
+The model lets volatility depend on its recent past. It describes the strength
+of that dependence with the Hurst exponent `H`:
 
-Measured on the S&P 500, the warrant holds, but only for the volatility:
+- `H ≈ 0.5` means no lasting pattern.
+- `H > 0.5` means high or low values tend to continue.
+- `H < 0.5` means values tend to reverse direction quickly.
 
-| series | variogram | DFA | Higuchi | sign null |
-|---|---|---|---|---|
+This setting needs evidence. Otherwise, changing `H` would be an arbitrary way
+to move the simulated drawdown results.
+
+The S&P 500 data support memory in the **size** of returns, but not in their
+**direction**:
+
+| series | variogram | DFA | Higuchi | result after randomizing signs |
+|---|---:|---:|---:|---:|
 | log returns (direction) | 0.491 | 0.449 | 0.467 | ≈ 0.50 ± 0.03 |
-| \|log returns\| (volatility) | 0.842 | 0.951 | 0.868 | ≈ 0.50 ± 0.04 |
+| absolute log returns (volatility) | 0.842 | 0.951 | 0.868 | ≈ 0.50 ± 0.04 |
 
-Direction is indistinguishable from memoryless (p = 0.92, 0.16, 0.007). Volatility
-is not remotely so: z = 7.6, 11.7, 21.5. The left panel of the figure shows why no
-significance test is really needed — the two fluctuation curves have visibly
-different slopes over 1.4 decades of scale.
+The three methods disagree slightly on the exact number, but they tell the same
+story. Return direction is close to memoryless. Large moves, however, tend to
+cluster with other large moves, and quiet periods tend to remain quiet. That is
+why `model.py` puts memory in volatility rather than using it to predict whether
+the market will rise or fall next.
 
-So the model is calibrated to a real stylized fact. Long memory lives exactly where
-`model.py` puts it, in `sigma_t`, and not in the returns themselves.
+## Why the comparison method matters
 
-## The methodological point, which is the actual reason this is here
+A memory estimate needs a fair “no directional memory” baseline. Simply
+shuffling the returns is not fair because it destroys both directional patterns
+and volatility clustering. The shuffled data therefore look very different
+from real market data even when return direction itself has no memory.
 
-The obvious null — shuffle the returns — is wrong, and wrong in the direction that
-manufactures a result. Shuffling destroys volatility clustering along with
-directional memory, so on any equity series it rejects almost by construction.
-Under that null the returns look significantly anti-persistent (p ≤ 0.005 on all
-three estimators). Under the sign-randomised null, `r* = ±|r_t|`, which preserves
-the `|r|` sequence exactly and destroys only memory in direction, the effect
-largely evaporates.
+This analysis uses a more focused comparison. It keeps every return magnitude
+in its original position and randomly changes only its sign:
 
-The nulls also move the reference point, not just the spread. Higuchi's null mean
-sits at 0.560 under shuffling and 0.507 under sign randomisation: 0.06 of apparent
-Hurst exponent that was pure heteroskedasticity artifact. In 5-year windows the
-shuffle null wanders between 0.516 and 0.601, tracking the volatility regime and
-peaking in the 2008-09 windows. A 2004-2009 estimate of H = 0.416 reads as strong
-anti-persistence against a fixed 0.5 line, and as an estimator being dragged by fat
-tails against its own null.
+```text
+r* = randomly chosen + or - sign × |r_t|
+```
 
-That is this project's thesis in miniature: a reported number whose error bar does
-not know it is wrong. Here the estimator is a Hurst estimator rather than a Monte
-Carlo one, but the failure mode is identical.
+The resulting series keeps calm and turbulent periods intact while removing
+any ability to predict direction. Against this baseline, most of the apparent
+directional pattern disappears. The strong pattern in absolute returns remains.
 
-## Caveats
+The baseline also changes what counts as a neutral Hurst estimate. For the
+Higuchi method, shuffled returns average `H = 0.560`, while sign-randomized
+returns average `H = 0.507`. That difference of about 0.05 comes from changing
+the volatility pattern, not from directional memory.
 
-- **The volatility exponent is scale-dependent.** DFA on `|r|` gives H = 0.82 out
-  to 50 days, 0.95 out to 250-1000 days. The table uses 250 days (~1 trading year).
-  The qualitative conclusion is stable; the specific number is not.
-- **H ≈ 0.95 is near the stationarity boundary.** The DFA bootstrap CI is
-  [0.864, 1.060] and crosses 1.0, where the fBm picture strains. Part of this is
-  plausibly slow drift in the volatility level rather than self-similar long memory.
-  Read the volatility exponent as "0.84-0.95, strongly persistent" and not as a
-  point estimate.
-- **Nothing here survives at 5-year horizons.** Rolling 5-year windows put the null
-  spread at ±0.04-0.09 (vs ±0.015 on the full sample), and essentially every window
-  estimate falls inside its own null band. At that sample size these estimators
-  cannot distinguish the index from a memoryless process.
-- **Estimator bias is not negligible.** On synthetic fGn of known H, DFA runs ~0.02
-  high at H = 0.3 and the variogram ~0.08 low at H = 0.9. Estimates near the extremes
-  should not be read to three decimal places. The harness that measured this was
-  retired with the rebuild; the numbers are recorded here rather than reproducible
-  from the current tree, and should be re-measured before being leaned on.
+Short samples make the problem worse. In rolling five-year windows, the
+baseline estimate changes with the market's volatility and reaches its highest
+levels around 2008–09. A 2004–09 estimate of `H = 0.416` looks strongly
+mean-reverting when compared with a fixed `0.5`. Compared with a baseline built
+from the same volatility pattern, it mostly looks like an estimator being
+distorted by extreme returns.
+
+This is a smaller version of the project's main point: an error bar can look
+precise while leaving out the most important source of uncertainty.
+
+## Limits of this evidence
+
+- **The answer depends on the time scale.** DFA estimates `H ≈ 0.82` for
+  absolute returns using windows up to 50 days and about `0.95` using windows
+  up to 250–1,000 days. The table uses 250 days, or roughly one trading year.
+  The conclusion that volatility is persistent is stable; the exact estimate
+  is not.
+- **An estimate near 1 needs caution.** The DFA 95% interval is
+  `[0.864, 1.060]`. Values around 1 strain the assumptions behind this model.
+  A slow change in the general level of volatility may explain part of the
+  result. Read it as “strong persistence, roughly 0.84–0.95,” not as a precise
+  estimate of `0.951`.
+- **Five years of data are not enough here.** In five-year windows, almost every
+  estimate falls inside its own no-memory range. These methods cannot reliably
+  distinguish the index from a memoryless process with so little data.
+- **The methods have some built-in bias.** On synthetic data with a known `H`,
+  DFA runs about 0.02 high at `H = 0.3`, and the variogram runs about 0.08 low
+  at `H = 0.9`. The script that measured those biases is no longer in the
+  repository, so they should be measured again before being used in a formal
+  analysis.

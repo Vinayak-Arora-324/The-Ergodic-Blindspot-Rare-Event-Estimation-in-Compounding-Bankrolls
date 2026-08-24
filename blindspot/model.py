@@ -1,29 +1,25 @@
-"""
-model.py -- the single canonical model for the project, plus the three estimators.
+"""Market models and simulation methods used by every experiment.
 
-The project is a *methods* project: the object of study is the estimator, and the
-tail-hedge strategy is only the test case.  Everything downstream (experiments,
-regression tests) imports the model from here and nowhere else.  The exploratory
-phase duplicated the model across five scripts with divergent parameterizations,
-which is exactly how the `exponnorm` bug (B3) survived undetected; one module is
-the fix.
+The project compares ways to estimate the price and effect of crash insurance.
+The hedge is a test case; the main subject is whether each simulation method
+reports a reliable result. Keeping the shared model here prevents experiments
+from silently using different assumptions.
 
-Contents
---------
-  1. Model parameters and the return density         (jump-diffusion, closed form)
-  2. Sampler                                          (must agree with the density)
-  3. Hedge: rolling deep-OTM put, actuarially fair    (markup knob for the sweep)
-  4. Quadrature truth                                 (g_hedged, edge, p_itm)
-  5. Estimators: crude, cv, cv_is                     (all unbiased, all target g_h)
-  6. Fractional Gaussian noise                        (driver for experiment E5)
-  7. The fBm drawdown family                          (estimand for E6 and E7)
-  8. Fat tails + transient volatility memory          (unified E8 model)
+This module contains:
 
-Standing caveat that must accompany every reported result: the default is
-`markup = 1.0`, i.e. the put is priced actuarially fair.  There is no variance
-risk premium at that setting, so every "the hedge wins" number below is
-conditional on an options market that does not exist.  `markup > 1` is the
-opposite-side sensitivity and is the first knob to sweep.
+1. A monthly return model with normal moves and rare downward jumps.
+2. Random sampling code checked against the model's probability formula.
+3. A strategy that buys a far-out-of-the-money put every month.
+4. Benchmark values calculated with numerical integration.
+5. Ordinary Monte Carlo and two noise-reduction methods.
+6. A volatility signal with adjustable memory.
+7. Multi-month bankroll and drawdown simulations.
+8. The combined market used by experiment E8.
+
+Important assumption for E1-E4: by default, the put costs exactly its average
+expected payoff (`markup = 1.0`). Real options normally include an extra charge
+for risk. These experiments therefore show a deliberately favorable case for
+the hedge; use `markup > 1` to explore a more expensive put.
 """
 
 from __future__ import annotations
@@ -42,10 +38,8 @@ from scipy.special import erfc
 #     r = m + S*Z            with probability 1 - LAM
 #     r = m + S*Z - E        with probability LAM,   E ~ Exp(mean BETA), Z ~ N(0,1)
 #
-# Left-skewed rather than symmetric, which is the honest shape for equity
-# crashes, and the natural one-sided restriction of CGMY.  It replaced an
-# earlier symmetric Student-t model, which was discarded (see the rebuild spec,
-# section 5 -- the t-model's cross-nu comparisons were invalidated by bug B1).
+# The rare component affects only the downside, which better matches an equity
+# crash than a symmetric model with equally large upward and downward moves.
 
 LAM = 1e-3      # jump probability per month
 BETA = 1.5      # mean jump size, in log points
@@ -58,11 +52,9 @@ MU = 0.005      # TARGET E[r]; pinned, see below
 # sits on the hedged side and none of it is contaminated by baseline noise.
 M_BULK = MU + LAM * BETA        # = 0.0065
 
-# Proposal measure for importance sampling: the same model with the jump
-# probability inflated.  Only LAM changes, so the likelihood ratio f/q is a
-# ratio of two mixtures over identical components and is therefore *bounded*
-# (verified range [0.0033, 1.4228]) -- finite IS variance by construction, not
-# by hope.
+# For crash oversampling (importance sampling), use the same model but make
+# jumps much more common. Each sample is reweighted afterward. Because only the
+# jump chance changes, those weights stay between known finite limits.
 LAM_Q = 0.30
 
 # Quadrature window.  See `truth()` for why the lower limit is far out at -40.
@@ -167,12 +159,10 @@ def put_payoff(r):
 
 @lru_cache(maxsize=8)
 def put_price(markup=1.0):
-    """Price paid per put = `markup` x the actuarially fair price E_f[payoff].
+    """Return `markup` times the put's average expected payoff.
 
-    markup = 1.0 (the default) means no variance risk premium: the hedger buys
-    insurance at cost.  That is the most favourable possible assumption for the
-    hedge and it is not a market that exists.  Results must be reported as
-    conditional on it.
+    The default `markup = 1.0` adds no extra charge for risk, which deliberately
+    favors the hedge. Real crash insurance normally costs more.
     """
     fair, _ = integrate.quad(
         lambda r: put_payoff(r) * pdf(r), LO, HI, limit=QUAD_LIMIT
@@ -185,27 +175,21 @@ def log_growth(r, markup=1.0, c=C):
 
     log( (1-c)*exp(r) + c*payoff(r)/price )
 
-    Note the shape of this function, because it is the reason the project's
-    original founding sentence was wrong.  In the bulk the put expires
-    worthless and this is just log(1-c) + r: a constant bleed.  In a crash the
-    payoff term *cancels* the index loss, so the result is mild and bounded
-    below.  Hedging destroys the rare-event structure of the hedged quantity.
-    The rare-event difficulty lives in the unhedged baseline and in the
-    hedged-minus-unhedged difference, not here.
+    In an ordinary month the put expires worthless, so the strategy loses its
+    premium. In a deep crash the put offsets the index loss, which makes hedged
+    growth much less extreme than the unhedged return.
     """
     r = np.asarray(r, dtype=float)
     return np.log((1.0 - c) * np.exp(r) + c * put_payoff(r) / put_price(markup))
 
 
 def control_variate(r, markup=1.0, c=C):
-    """D(r) = log_growth(r) - r, the hedge's *effect* on log growth.
+    """Return the hedge's effect: hedged log growth minus the index return.
 
-    Used as a control variate: E[r] = MU is known exactly (by the pinning in
-    section 1), so only E[D] needs estimating and the estimator is
-    mean(D) + MU.  D is constant (= log(1-c)) throughout the bulk and nonzero
-    only in crashes -- which is what makes it the right target for importance
-    sampling, and simultaneously what makes it *harder* than log_growth to
-    estimate by crude sampling.  See `estimator_note` below.
+    The average index return `E[r] = MU` is known exactly, so a control-variate
+    estimate only needs to simulate the remaining difference `D`. That
+    difference is almost constant in ordinary months and highly uneven during
+    crashes, which is why crash oversampling helps after this transformation.
     """
     return log_growth(r, markup=markup, c=c) - np.asarray(r, dtype=float)
 
@@ -215,15 +199,12 @@ def control_variate(r, markup=1.0, c=C):
 # ---------------------------------------------------------------------------
 @lru_cache(maxsize=8)
 def truth(markup=1.0, lo=LO):
-    """Ground truth by 1-D quadrature. Returns a dict.
+    """Calculate benchmark one-month values with numerical integration.
 
-    Under iid returns the ergodic growth rate of a bankroll *is* this
-    single-period expectation (LLN), so g collapses to a 1-D integral and no
-    bankroll loop is needed -- a loop would only add Monte Carlo noise to a
-    quantity that was never path-dependent.  This is why the rare-event
-    machinery in section 5 is, for this estimand, unnecessary: quadrature beats
-    every Monte Carlo method here.  Experiment E4 is where that stops being
-    true.
+    When monthly returns are independent, long-run average growth equals the
+    expected growth in one month. A one-dimensional integral can therefore
+    calculate it without simulation noise. Experiment E4 studies win rates and
+    drawdowns that depend on the order of returns and need full paths instead.
 
     Caveat, deliberately kept in a comment rather than asserted as a claim:
     adaptive `quad` over [-40, 2] resolves the width-0.05 bulk only because the
@@ -322,24 +303,24 @@ def edge_and_p(lam, c, beta=BETA, s=S, k=K, markup=1.0, lo=-60.0):
 # model does not have.
 
 def est_crude(rng, n, markup=1.0):
-    """Crude Monte Carlo: sample from f, average the log growth."""
+    """Ordinary Monte Carlo: simulate `n` months and average log growth."""
     return log_growth(sample_returns(rng, n, LAM), markup).mean()
 
 
 def est_cv(rng, n, markup=1.0):
-    """Control variate only: average D under f, add back the known E[r] = MU."""
+    """Crash control only: estimate the hedge's effect and add known growth."""
     return control_variate(sample_returns(rng, n, LAM), markup).mean() + MU
 
 
 def est_cv_is(rng, n, markup=1.0):
-    """Control variate + importance sampling: average w*D under q, add MU."""
+    """Combine the crash control with reweighted crash oversampling."""
     y = sample_returns(rng, n, LAM_Q)
     w = pdf(y, LAM) / pdf(y, LAM_Q)
     return (control_variate(y, markup) * w).mean() + MU
 
 
 def est_is(rng, n, markup=1.0):
-    """IS without the control variate -- included only to show that it fails."""
+    """Use crash oversampling alone, included to show that it adds noise here."""
     y = sample_returns(rng, n, LAM_Q)
     w = pdf(y, LAM) / pdf(y, LAM_Q)
     return (log_growth(y, markup) * w).mean()
@@ -598,7 +579,7 @@ def wipeout(log_drawdown):
 
 
 # ---------------------------------------------------------------------------
-# 8. Unified fat-tail + transient-memory market (E8)
+# 8. Combined rare-crash market with finite volatility memory (E8)
 # ---------------------------------------------------------------------------
 # E1-E7 deliberately isolate mechanisms.  E8 is the model the original project
 # question actually asks for: fat left tails and locally rough/persistent
@@ -637,11 +618,11 @@ def _jump_gross_moment(lam, beta=RS_BETA):
 
 
 def regime_sum_variance(local_h, n, cutoff=MEM_CUTOFF):
-    """Exact variance of a reset-fGn partial sum.
+    """Return the exact variance of the volatility signal across reset regimes.
 
-    `local_h` may be one H or a cycle of regime exponents.  This deterministic
-    identity is the audit trail for the claim that local anomalous scaling
-    crosses to ordinary H=1/2 scaling at long horizons.
+    `local_h` may be one Hurst exponent or a repeating sequence. The formula
+    checks that short-run memory eventually returns to ordinary `H = 0.5`
+    behavior when many independent regimes are joined.
     """
     if n < 0 or cutoff < 1:
         raise ValueError("n must be non-negative and cutoff must be positive")
@@ -657,12 +638,11 @@ def regime_sum_variance(local_h, n, cutoff=MEM_CUTOFF):
 
 
 def regime_fgn(rng, n_paths, horizon, local_h=0.8, cutoff=MEM_CUTOFF):
-    """Unit-variance fGn in independent finite regimes.
+    """Generate a unit-variance volatility signal in independent regimes.
 
-    A scalar H gives repeated regimes of the same local roughness.  A sequence
-    cycles through regimes, e.g. `(0.1, 0.8)` for alternating rough/persistent
-    markets.  Resetting is intentional, not a simulation shortcut: it is the
-    finite memory that restores H=1/2 at long horizons.
+    One Hurst value repeats the same kind of regime. A sequence such as
+    `(0.1, 0.8)` alternates quickly reversing and persistent regimes. Each reset
+    ends the old dependence, so long-run behavior returns to `H = 0.5`.
     """
     hs = np.atleast_1d(np.asarray(local_h, dtype=float))
     if np.any((hs <= 0) | (hs >= 1)):
@@ -724,7 +704,7 @@ def _conditional_tail_put_components(sigma):
 
 
 def conditional_tail_put_price(sigma, markup=1.0):
-    """Risk-neutral one-month price of the rolling tail put, conditional on sigma.
+    """Price the one-month crash put for a given current volatility.
 
     The formula is analytic for both mixture components.  The exponential tilt
     in the truncated first moment turns Exp(mean beta) into
@@ -737,7 +717,7 @@ def conditional_tail_put_price(sigma, markup=1.0):
 
 @lru_cache(maxsize=4)
 def tail_put_truth_and_cv(order=36):
-    """Deterministic quadrature truth and the crash-indicator control coefficient.
+    """Calculate the benchmark put price and crash-control adjustment.
 
     Returns the discounted Q price and theta for
     `put - theta*(I_jump - lambda_Q)`.  Conditional put moments are analytic;
@@ -765,7 +745,7 @@ def tail_put_truth_and_cv(order=36):
 
 def simulate_regime_market(rng, n_paths, horizon, local_h=0.8, measure="Q",
                            cutoff=MEM_CUTOFF, proposal_lam=None):
-    """Simulate fat-tailed stochastic-volatility returns and likelihood weights."""
+    """Simulate returns with rare crashes, changing volatility, and sample weights."""
     _, target_lam = _market_parameters(measure)
     sim_lam = target_lam if proposal_lam is None else float(proposal_lam)
     if not 0 < sim_lam < 1:
@@ -783,7 +763,7 @@ def simulate_regime_market(rng, n_paths, horizon, local_h=0.8, measure="Q",
 
 def price_estimators_once(rng, budget=16_384, horizon=256, local_h=0.8,
                           cutoff=MEM_CUTOFF):
-    """One equal-budget draw from crude, CV, IS, and CV+IS put-price estimators."""
+    """Run all four put-pricing methods once with the same sample budget."""
     n_paths = max(1, int(budget) // int(horizon))
     n_obs = n_paths * int(horizon)
     theta = tail_put_truth_and_cv()["theta"]
@@ -816,7 +796,7 @@ def price_estimators_once(rng, budget=16_384, horizon=256, local_h=0.8,
 
 def run_price_trials(rng, trials=200, budget=16_384, horizon=256,
                      local_h=0.8, cutoff=MEM_CUTOFF):
-    """Sampling distributions of all four E8 pricing estimators."""
+    """Repeat all four E8 pricing methods and return their results."""
     names = ("crude", "cv", "is", "cv_is")
     out = {name: np.empty(int(trials)) for name in names}
     for i in range(int(trials)):
@@ -828,7 +808,7 @@ def run_price_trials(rng, trials=200, budget=16_384, horizon=256,
 
 def tail_hedge_strategy_paths(rng, n_paths=50_000, horizon=120, local_h=0.8,
                               cutoff=MEM_CUTOFF, markup=1.0):
-    """Physical-measure bankroll paths for the rolling, Q-priced tail hedge."""
+    """Simulate bankroll paths for the rolling crash hedge and no-hedge case."""
     draw = simulate_regime_market(
         rng, n_paths, horizon, local_h, "P", cutoff, proposal_lam=RS_LAM_P
     )
@@ -848,15 +828,15 @@ def tail_hedge_strategy_paths(rng, n_paths=50_000, horizon=120, local_h=0.8,
 
 
 if __name__ == "__main__":
-    # Smoke test: the model's own consistency checks and the headline truths.
+    # Quick consistency check and the main benchmark values.
     check_density()
     t = truth()
-    print("closed-form density vs scipy .............. OK (rtol 1e-10)")
-    print(f"fair put price ........................... {t['price']:.6f}")
-    print(f"g_unhedged (exact, pinned) ............... {t['g_unhedged']:+.6f}")
-    print(f"g_hedged   (quadrature) .................. {t['g_hedged']:+.6f}")
-    print(f"edge ..................................... {t['edge']:+.6f}")
-    print(f"p_itm  P(put ITM in one month) ........... {t['p_itm']:.3e}")
-    print(f"p_jump P(a jump occurs in one month) ..... {t['p_jump']:.3e}  (different number)")
-    print(f"markup ................................... {t['markup']:.2f}"
-          "  <- fair pricing; no variance risk premium")
+    print("return probability formula matches scipy  OK (tolerance 1e-10)")
+    print(f"put price at average expected payoff ..... {t['price']:.6f}")
+    print(f"average growth without hedge ............. {t['g_unhedged']:+.6f}")
+    print(f"average growth with hedge ................ {t['g_hedged']:+.6f}")
+    print(f"difference caused by hedge ............... {t['edge']:+.6f}")
+    print(f"chance the put pays in one month ......... {t['p_itm']:.3e}")
+    print(f"chance any jump occurs in one month ...... {t['p_jump']:.3e}")
+    print(f"price multiplier .......................... {t['markup']:.2f}"
+          "  (no extra charge for risk)")

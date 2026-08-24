@@ -1,46 +1,35 @@
-"""
-experiments.py -- eight experiments, behind one command line.
+"""Run the project's eight simulation experiments from one command line.
 
     python -m blindspot.experiments             # list them
     python -m blindspot.experiments e1 e2       # run a subset
     python -m blindspot.experiments all         # run all and write figures
     python -m blindspot.experiments all --no-plots
 
-E1-E7 isolate individual failure modes; E8 recombines the pieces into the
-original fat-tail, transient-memory hedge-pricing question.
+E1-E7 each explain one way a simulation or its error bar can mislead us. E8
+combines them in one crash-insurance example.
 
-  E1  the median lies       -- crude MC is unbiased in expectation while the
-                               TYPICAL run reports near zero.
-  E2  where the variance is -- the baseline, the variance decomposition, and
-                               why the control variate makes things WORSE alone.
-  E3  the convergence figure-- every method converges at N^-1/2; variance
-                               reduction moves the intercept, never the rate.
-                               The figure is the deliverable here.
-  E4  path functionals      -- the estimand choice dominates the estimator
-                               choice. This is the most important experiment.
-  E5  the error bar lies    -- under long-memory volatility, iid-formula
-                               confidence intervals get MORE overconfident as
-                               the sample grows.
-  E6  drawdown family       -- one path estimand across rough/persistent H.
-  E7  honesty panel         -- grid bias and dependence defeat different
-                               estimator designs in different H regimes.
-  E8  unified pricing       -- fat tails, finite memory, separate P/Q measures,
-                               and crude/CV/IS/CV+IS at one compute budget.
+  E1  rare payoffs          -- most small runs miss the event, even though the
+                               average across many runs is correct.
+  E2  sources of noise      -- shows where simulation noise comes from and why
+                               one noise-reduction method hurts when used alone.
+  E3  convergence           -- compares how quickly the methods become precise.
+  E4  bankroll paths        -- compares averages with the outcomes experienced
+                               along individual multi-month paths.
+  E5  misleading error bars -- shows how volatility memory breaks an error
+                               formula that assumes independent months.
+  E6  drawdowns             -- compares extreme losses across Hurst settings.
+  E7  interval accuracy     -- checks whether two methods report realistic
+                               uncertainty for those drawdowns.
+  E8  full comparison       -- combines rare crashes, finite volatility memory,
+                               option pricing, and bankroll outcomes.
 
-Conventions enforced throughout (see the rebuild spec, section 9):
-  * every RNG is seeded explicitly and the seed is printed beside the results;
-  * every reported estimate carries its Monte Carlo standard error;
-  * no Python loop over samples -- everything is vectorized over trials/paths;
-  * captions and prose must not outrun what was established. Overclaiming is a
-    substantive error in this project, not a stylistic one: two false findings
-    in the exploratory phase came from exactly that. A figure is prose: an axis
-    that flatters is the same error as a sentence that flatters;
-  * every figure carries the fair-pricing caveat in its footer, for the same
-    reason every table of numbers carries it in its trailer.
+Every random-number generator has a fixed, printed seed, and every estimate is
+reported with its Monte Carlo standard error. Charts use the same cautions as
+the printed results.
 
-Standing caveat on every E1-E4 number: the put is priced actuarially fair
-(markup = 1.0). No variance risk premium exists at that setting, so every
-"the hedge wins" result is conditional on a market that does not exist.
+Important assumption for E1-E4: the put is sold at its average expected payoff
+(`markup = 1.0`). Real options normally include an extra charge for risk, so
+these experiments show a deliberately favorable case for the hedge.
 """
 
 from __future__ import annotations
@@ -70,9 +59,9 @@ def _banner(tag, title):
 
 
 def _fair_pricing_note():
-    print("\n[caveat] markup = 1.0: the put is actuarially fair. Every 'hedge wins'")
-    print("         number above is conditional on a market with no variance risk")
-    print("         premium, i.e. one that does not exist.")
+    print("\n[note] markup = 1.0: the put costs only its average expected payoff.")
+    print("       Real options normally include an extra charge for risk, so these")
+    print("       results are a deliberately favorable case for the hedge.")
 
 
 # ---------------------------------------------------------------------------
@@ -182,8 +171,8 @@ def _note(fig, text):
 
 #: Travels on every E1-E4 figure, for the same reason it travels on every table.
 FAIR_PRICING_FOOTER = (
-    "markup = 1.0: the put is priced actuarially fair, so every 'the hedge wins' "
-    "reading here is conditional on a market with no variance risk premium."
+    "markup = 1.0: the put costs only its average expected payoff. Real options "
+    "normally include an extra charge for risk, so this favors the hedge."
 )
 
 
@@ -215,7 +204,7 @@ def _suptitle(fig, text, sub):
 # E1 -- the median lies
 # ---------------------------------------------------------------------------
 def e1(trials=3000, outfile=FIGURES / "rare_payoff.png"):
-    """Single-period rare payoff: unbiased in expectation, near-zero typically.
+    """Show why a correct average can hide a useless typical estimate.
 
     Estimand: E[put payoff] for one month, whose exact value is the fair price
     computed by quadrature in `model.put_price()`.
@@ -233,7 +222,7 @@ def e1(trials=3000, outfile=FIGURES / "rare_payoff.png"):
     longer apply. The acceptance criteria are the qualitative ones and they do
     survive: mean ~ truth, median ~ 0, a large fraction of runs see nothing.
     """
-    _banner("e1", "the median lies (single period)")
+    _banner("e1", "most small runs miss a rare payoff")
     rng = np.random.default_rng(SEEDS["e1"])
     truth = M.truth()
     p = truth["p_itm"]
@@ -245,10 +234,10 @@ def e1(trials=3000, outfile=FIGURES / "rare_payoff.png"):
     n_afford = 1000
 
     print(f"seed {SEEDS['e1']}   trials {trials:,}")
-    print(f"P(put ITM in one month) .......... {p:.3e}")
-    print(f"affordable N ..................... {n_afford:,}  "
+    print(f"chance the put pays this month ... {p:.3e}")
+    print(f"samples in one small run ......... {n_afford:,}  "
           f"(~{n_afford * p:.2f} crashes per run)")
-    print(f"TRUE E[payoff] (quadrature) ...... {e_payoff:.6f}")
+    print(f"benchmark average payoff ......... {e_payoff:.6f}")
 
     ests = np.array(
         [M.put_payoff(M.sample_returns(rng, n_afford)).mean() for _ in range(trials)]
@@ -256,19 +245,18 @@ def e1(trials=3000, outfile=FIGURES / "rare_payoff.png"):
     mc_se = ests.std(ddof=1) / np.sqrt(trials)
 
     print(f"\nmean of {trials:,} estimates ......... {ests.mean():.6f} "
-          f"+/- {mc_se:.6f} (MC-SE)   <- unbiased")
-    print(f"bias in MC-SE units .............. {(ests.mean() - e_payoff) / mc_se:+.2f}")
-    print(f"MEDIAN estimate .................. {np.median(ests):.6f}   <- the typical run")
-    print(f"sd of estimates .................. {ests.std(ddof=1):.6f}")
-    print(f"coefficient of variation ......... {ests.std(ddof=1) / ests.mean():.2f}")
+          f"+/- {mc_se:.6f} (error in the mean)")
+    print(f"difference / error in mean ....... {(ests.mean() - e_payoff) / mc_se:+.2f}")
+    print(f"typical (median) estimate ........ {np.median(ests):.6f}")
+    print(f"spread of estimates (sd) ......... {ests.std(ddof=1):.6f}")
     print(f"runs that saw zero crashes ....... {(ests == 0).mean():.2%}")
-    print(f"runs below half of truth ......... {(ests < 0.5 * e_payoff).mean():.2%}")
+    print(f"runs below half the benchmark .... {(ests < 0.5 * e_payoff).mean():.2%}")
 
     # The median estimate is exactly zero iff a majority of runs see no crash,
     # i.e. iff (1-p)^N > 1/2, i.e. N < log(2)/p. Stating the threshold keeps
     # the claim precise: "the median lies" is a statement about the budget
     # relative to 1/p, not a defect of the estimator.
-    print(f"median is exactly 0 for N < ln2/p = {np.log(2) / p:,.0f}")
+    print(f"the typical result is zero below N = ln(2)/p = {np.log(2) / p:,.0f}")
 
     # The spike does not survive more budget: this is a statement about
     # affordability, not about the estimator being broken. The grid straddles
@@ -293,8 +281,8 @@ def e1(trials=3000, outfile=FIGURES / "rare_payoff.png"):
         print(f"{n:9,} {tr:7,} {e.mean():10.6f} {np.median(e):10.6f} "
               f"{(e == 0).mean():9.1%} {(e < 0.5 * e_payoff).mean():11.1%}")
     sweep = {k: np.array(v) for k, v in sweep.items()}
-    print("\nThe median converges to the truth from BELOW as N grows. Nothing about")
-    print("the estimator changes; only whether the budget can see the event.")
+    print("\nAs the sample budget grows, the typical result moves toward the benchmark.")
+    print("The method was always correct on average; small runs simply miss the event.")
 
     if PLOTS:
         _e1_figure(ests, e_payoff, p, n_afford, ns, sweep, trials, outfile)
@@ -329,10 +317,10 @@ def _e1_figure(ests, e_payoff, p, n_afford, ns, sweep, trials, outfile):
                   xycoords=("data", "axes fraction"), textcoords="offset points",
                   xytext=(7, 0), fontsize=8.4, color=INK_2,
                   bbox=dict(facecolor="white", edgecolor="none", pad=1.4))
-    ax_a.set_xlabel("estimate of E[put payoff] from one run")
+    ax_a.set_xlabel("estimated average put payoff from one run")
     ax_a.set_ylabel("share of runs (%, log scale)")
     _grid(ax_a)
-    _title(ax_a, f"A. Median 0, mean {ests.mean():.4f}: unbiased and useless")
+    _title(ax_a, f"A. The average is {ests.mean():.4f}, but most runs report zero")
 
     # --- B. mean and median against budget ---
     ax_b.axhline(e_payoff, color=INK, ls="--", lw=1.6)
@@ -347,11 +335,11 @@ def _e1_figure(ests, e_payoff, p, n_afford, ns, sweep, trials, outfile):
                   xytext=(-7, 0), ha="right", fontsize=8.0, color=MUTED)
     ax_b.set_xscale("log")
     ax_b.set_xlabel("samples per run, N")
-    ax_b.set_ylabel("estimate of E[put payoff]")
+    ax_b.set_ylabel("estimated average put payoff")
     ax_b.set_ylim(-0.1 * e_payoff, 1.9 * e_payoff)
     ax_b.legend(loc="upper left")
     _grid(ax_b)
-    _title(ax_b, "B. The mean is right at every budget")
+    _title(ax_b, "B. The average across runs is right at every budget")
 
     # --- C. the same thing as a failure rate ---
     ax_c.plot(ns, 100 * sweep["p_zero"], "o-", color=BLUE, ms=5,
@@ -367,13 +355,14 @@ def _e1_figure(ests, e_payoff, p, n_afford, ns, sweep, trials, outfile):
     ax_c.set_ylim(-3, 103)
     ax_c.legend(loc="upper right")
     _grid(ax_c)
-    _title(ax_c, "C. A budget problem, not a bias")
+    _title(ax_c, "C. Small budgets miss rare crashes")
 
-    _suptitle(fig, "E1  The median lies",
-              "Crude MC for a rare payoff is unbiased in expectation, and the run "
-              "you can afford still reports zero.")
-    _note(fig, "Estimand: E[put payoff] over one month, truth by quadrature. "
-               "Unbiasedness is a property of the average over runs; you get one run.")
+    _suptitle(fig, "E1  Most small runs miss a rare payoff",
+              "Ordinary Monte Carlo is correct on average, but an affordable run "
+              "will often see no crash and report zero.")
+    _note(fig, "Target: the average one-month put payoff; benchmark calculated by "
+               "numerical integration. Correctness describes the average across many "
+               "runs, while a user normally gets only one run.")
     _save(fig, outfile, top=0.88)
 
 
@@ -395,19 +384,19 @@ def e2(n=5000, trials=2000, n_diag=2_000_000,
        hedged-minus-unhedged difference -- not in the hedged portfolio. The
        project's original founding sentence had this backwards.
     """
-    _banner("e2", "iid growth baseline + variance diagnosis")
+    _banner("e2", "where the simulation noise comes from")
     rng = np.random.default_rng(SEEDS["e2"])
     t = M.truth()
     edge = t["edge"]
 
     print(f"seed {SEEDS['e2']}   N {n:,}   trials {trials:,}")
-    print(f"\n-- truth (quadrature; g_unhedged is exact by construction) --")
-    print(f"g_unhedged ....................... {t['g_unhedged']:+.6f}")
-    print(f"g_hedged ......................... {t['g_hedged']:+.6f}")
-    print(f"edge ............................. {edge:+.6f}")
-    print(f"P(put ITM), one month ............ {t['p_itm']:.3e}")
-    print(f"P(jump),    one month ............ {t['p_jump']:.3e}   <- a different")
-    print("                                              quantity; only ITM puts help")
+    print("\n-- benchmark values --")
+    print(f"average growth without hedge ..... {t['g_unhedged']:+.6f}")
+    print(f"average growth with hedge ........ {t['g_hedged']:+.6f}")
+    print(f"difference caused by hedge ....... {edge:+.6f}")
+    print(f"chance the put pays this month ... {t['p_itm']:.3e}")
+    print(f"chance any jump occurs ........... {t['p_jump']:.3e}")
+    print("Only jumps large enough to cross the strike make the put pay.")
 
     # --- where does the variance live? ---
     x = M.sample_returns(rng, n_diag)
@@ -421,25 +410,25 @@ def e2(n=5000, trials=2000, n_diag=2_000_000,
         w = crash.mean()
         return (np.var(v[crash]) + (v[crash].mean() - v.mean()) ** 2) * w / np.var(v)
 
-    print(f"\n-- variance decomposition ({n_diag:,} draws) --")
-    print(f"per-sample sd of log_growth ...... {lg.std():.4f}   <- bulk noise, s={M.S}")
-    print(f"per-sample sd of D = lg - r ...... {d.std():.4f}   <- crash-driven only "
-          f"({'WORSE' if d.std() > lg.std() else 'better'})")
-    print(f"crash share of Var(log_growth) ... {crash_share(lg):.1%}   (hedged)")
-    print(f"crash share of Var(r) ............ {crash_share(x):.1%}   (unhedged)")
-    print(f"mean log_growth in a crash ....... {lg[crash].mean():+.3f}   <- bounded: the")
-    print(f"mean r          in a crash ....... {x[crash].mean():+.3f}      payoff cancels")
-    print("                                              the index loss")
+    print(f"\n-- sources of noise ({n_diag:,} draws) --")
+    print(f"spread of hedged growth .......... {lg.std():.4f}")
+    print(f"spread of the hedge's effect ..... {d.std():.4f}   "
+          f"({'larger' if d.std() > lg.std() else 'smaller'} than before)")
+    print(f"crashes' share of hedged variance  {crash_share(lg):.1%}")
+    print(f"crashes' share of unhedged variance {crash_share(x):.1%}")
+    print(f"average hedged growth in a crash . {lg[crash].mean():+.3f}")
+    print(f"average unhedged return in a crash {x[crash].mean():+.3f}")
+    print("The put offsets most of the index loss during a crash.")
 
     # --- how many samples to resolve the sign, analytically ---
-    print(f"\n-- sample counts to call sign(edge) at 2 sigma, N = (2*sd/edge)^2 --")
-    print(f"crude MC ......................... {int((2 * lg.std() / edge) ** 2):,}")
-    print(f"after control variate ............ {int((2 * d.std() / edge) ** 2):,}")
+    print("\n-- samples needed to tell whether the hedge helps --")
+    print(f"ordinary Monte Carlo ............. {int((2 * lg.std() / edge) ** 2):,}")
+    print(f"crash control alone .............. {int((2 * d.std() / edge) ** 2):,}")
 
     # --- the three estimators, empirically ---
-    print(f"\n-- estimators at N = {n:,}, {trials:,} trials --")
-    print(f"{'estimator':30s} {'mean':>10} {'bias/MC-SE':>11} {'sd':>10} "
-          f"{'var reduction':>14}")
+    print(f"\n-- methods at N = {n:,}, across {trials:,} runs --")
+    print(f"{'method':30s} {'mean':>10} {'difference/SE':>13} {'spread':>10} "
+          f"{'noise improvement':>17}")
     sds = {}
     for name, fn, _ in M.ESTIMATORS:
         e = M.run_trials(fn, n, trials, rng)
@@ -459,18 +448,18 @@ def e2(n=5000, trials=2000, n_diag=2_000_000,
           f"{(sds['crude MC'] / e_is.std(ddof=1)) ** 2:13.1f}x")
 
     lo, hi = M.is_weight_range(rng)
-    print(f"\nIS weights f/q bounded in [{lo:.4f}, {hi:.4f}] -> finite variance by")
-    print("construction, not by hope.")
+    print(f"\nReweighting factors stay between {lo:.4f} and {hi:.4f}, so a few")
+    print("samples cannot produce unbounded noise.")
 
     # The deflationary reading, which must be reported with the speedup.
     t0 = time.perf_counter()
     M.truth.cache_clear()
     M.truth()
     ms = 1000 * (time.perf_counter() - t0)
-    print(f"\n[deflation] quadrature returns the same answer in {ms:.1f} ms with no")
-    print("            samples at all. Under iid returns g is a 1-D integral (LLN),")
-    print("            so the variance reduction is a real capability aimed at a")
-    print("            problem this model does not have. E4 is where that changes.")
+    print(f"\n[note] Numerical integration gets the same answer in {ms:.1f} ms without")
+    print("       simulation. For independent monthly returns, average growth is only")
+    print("       a one-dimensional integral. E4 introduces results that depend on a")
+    print("       whole multi-month path and cannot be calculated this way.")
     _fair_pricing_note()
 
     if PLOTS:
@@ -502,7 +491,7 @@ def _e2_figure(lg, d, x, crash_share, sds, n, trials, ms, outfile):
     ax_a.set_ylabel("share of variance carried by crashes (%)")
     ax_a.set_ylim(0, 100)
     _grid(ax_a)
-    _title(ax_a, "A. Hedging destroys the rare event it was built for")
+    _title(ax_a, "A. The put removes most crash noise from hedged growth")
 
     # --- B. the two per-sample distributions the estimators actually average ---
     ax_b.hist(lg, bins=140, histtype="step", lw=2.0, color=BLUE, density=True,
@@ -519,7 +508,7 @@ def _e2_figure(lg, d, x, crash_share, sds, n, trials, ms, outfile):
     # data to make room for its own key is not a trade a figure gets to make.
     ax_b.legend(loc="lower left")
     _grid(ax_b)
-    _title(ax_b, "B. The control variate trades bulk noise for skew")
+    _title(ax_b, "B. Removing ordinary noise leaves an uneven crash-only result")
 
     # --- C. what each method is worth, against the 1x line ---
     order = [(name, col) for name, _, col in M.ESTIMATORS]
@@ -545,11 +534,11 @@ def _e2_figure(lg, d, x, crash_share, sds, n, trials, ms, outfile):
     ax_c.set_ylim(0.3, max(ratios) * 4)
     ax_c.set_ylabel("variance reduction vs crude MC (log scale)")
     _grid(ax_c)
-    _title(ax_c, "C. Neither half works alone")
+    _title(ax_c, "C. The two noise-reduction steps work best together")
 
-    _suptitle(fig, "E2  The variance is in the baseline, not the hedge",
-              "Diagnose where a rare event carries the variance before reaching "
-              "for rare-event machinery.")
+    _suptitle(fig, "E2  Most of the noise comes from the unhedged return",
+              "The crash control and crash oversampling hurt when used alone, but "
+              "reduce noise sharply when combined.")
     _note(fig, f"A: law of total variance over {len(x):,} draws, crash = "
                f"$r < \\log(K/S_0)$.  C: N = {n:,} per run, {trials:,} runs.  "
                f"{FAIR_PRICING_FOOTER}\nQuadrature returns this same answer in "
@@ -577,25 +566,25 @@ def e3(n_panel_a=4096, trials_a=2000, trials_b=300,
     Panel A uses a log y-axis because on a linear axis the cv_is spike is so
     tall that it erases the other two distributions.
     """
-    _banner("e3", "convergence figure")
+    _banner("e3", "how precision improves with more samples")
     rng = np.random.default_rng(SEEDS["e3"])
     t = M.truth()
     g_h, g_u, edge = t["g_hedged"], t["g_unhedged"], t["edge"]
     thresh = edge / 2.0     # sd at which g_h and g_u are 2 sigma apart
 
     print(f"seed {SEEDS['e3']}")
-    print(f"g_u {g_u:+.6f}   g_h {g_h:+.6f}   edge {edge:+.6f}   "
-          f"sd threshold {thresh:.2e}")
+    print(f"unhedged growth {g_u:+.6f}   hedged growth {g_h:+.6f}")
+    print(f"hedge difference {edge:+.6f}   target spread {thresh:.2e}")
 
     # --- Panel A: sampling distributions at one affordable N ---
     samples = {name: M.run_trials(fn, n_panel_a, trials_a, rng)
                for name, fn, _ in M.ESTIMATORS}
-    print(f"\nunbiasedness at N={n_panel_a:,} (truth {g_h:+.6f}):")
+    print(f"\nresults at N={n_panel_a:,} (benchmark {g_h:+.6f}):")
     for name, _, _ in M.ESTIMATORS:
         e = samples[name]
         mc_se = e.std(ddof=1) / np.sqrt(trials_a)
         print(f"  {name:30s} mean {e.mean():+.6f}  "
-              f"bias {(e.mean() - g_h) / mc_se:+.1f} MC-SE  "
+              f"difference/SE {(e.mean() - g_h) / mc_se:+.1f}  "
               f"median {np.median(e):+.6f}")
 
     # --- Panel B: sd vs N ---
@@ -604,7 +593,7 @@ def e3(n_panel_a=4096, trials_a=2000, trials_b=300,
                            for n in ns])
            for name, fn, _ in M.ESTIMATORS}
 
-    print(f"\n{'estimator':30s} {'slope':>7} {'N to resolve sign':>19}")
+    print(f"\n{'method':30s} {'rate':>7} {'N needed to see effect':>24}")
     n_star = {}
     for name, _, _ in M.ESTIMATORS:
         v = sds[name]
@@ -613,8 +602,9 @@ def e3(n_panel_a=4096, trials_a=2000, trials_b=300,
         a = np.exp(np.log(v).mean() - slope * np.log(ns).mean())
         n_star[name] = (thresh / a) ** (1.0 / slope)
         print(f"{name:30s} {slope:7.3f} {n_star[name]:19,.0f}")
-    print("\nAll slopes are -1/2. The empirical N for crude MC cross-validates the")
-    print("analytic (2*sd/edge)^2 from E2 -- two independent routes to the same number.")
+    print("\nEvery method's spread shrinks at the usual rate: doubling precision needs")
+    print("about four times as many samples. The methods differ in how much noise they")
+    print("start with, not in how quickly additional samples help.")
 
     if PLOTS:
         _e3_figure(samples, ns, sds, n_star, thresh, g_h, g_u, n_panel_a, outfile)
@@ -642,11 +632,11 @@ def _e3_figure(samples, ns, sds, n_star, thresh, g_h, g_u, n_panel_a, outfile):
                  label=f"$g_u$ = {g_u:.5f} (no hedge)")
     ax_a.set_yscale("log")      # linear y would let the cv_is spike erase the rest
     ax_a.set_xlim(g_h - 0.0045, g_h + 0.0045)
-    ax_a.set_xlabel("estimate of geometric growth rate $g$")
+    ax_a.set_xlabel("estimated long-run growth rate $g$")
     ax_a.set_ylabel("density (log scale)")
     ax_a.legend(loc="upper left", fontsize=7.8)
     _grid(ax_a)
-    _title(ax_a, f"A. One affordable budget, N = {n_panel_a:,}")
+    _title(ax_a, f"A. Results from one sample budget, N = {n_panel_a:,}")
 
     # --- B. sd against N, all three slopes ---
     for name, _, col in M.ESTIMATORS:
@@ -666,16 +656,16 @@ def _e3_figure(samples, ns, sds, n_star, thresh, g_h, g_u, n_panel_a, outfile):
     ax_b.set_xscale("log")
     ax_b.set_yscale("log")
     ax_b.set_xlabel("samples per run, N")
-    ax_b.set_ylabel("sd of the estimator (log scale)")
+    ax_b.set_ylabel("spread of estimates (log scale)")
     ax_b.legend(loc="lower left")
     _grid(ax_b, axis="both", which="both")
-    _title(ax_b, "B. Every slope is $N^{-1/2}$")
+    _title(ax_b, "B. Every method improves at the same rate")
 
-    _suptitle(fig, "E3  Variance reduction moves the intercept, not the rate",
-              "Three unbiased estimators of the same number, and the log-log plot "
-              "that cannot see its own blind spot.")
-    _note(fig, f"{FAIR_PRICING_FOOTER}\nQuadrature needs no $N$ at all, so the "
-               f"method that actually wins here cannot be drawn on these axes.")
+    _suptitle(fig, "E3  Less noise, but the same rate of improvement",
+              "All three methods estimate the same number. Better methods start "
+              "with less noise, but extra samples help each one at the same rate.")
+    _note(fig, f"{FAIR_PRICING_FOOTER}\nNumerical integration needs no simulated "
+               f"samples, so it does not appear on this sample-size chart.")
     _save(fig, outfile, top=0.90)
 
 
@@ -712,7 +702,7 @@ def e4(horizon=120, paths=400_000, n_track=5_000,
     the running-state trick cannot give back; 5k paths is ample for a 5-95%
     band and costs ~5 MB, while every NUMBER below still uses all `paths`.
     """
-    _banner("e4", "path functionals")
+    _banner("e4", "what happens along individual bankroll paths")
     rng = np.random.default_rng(SEEDS["e4"])
     t = M.truth()
     edge = t["edge"]
@@ -748,32 +738,28 @@ def e4(horizon=120, paths=400_000, n_track=5_000,
     diff = x_h - x_u
     se = lambda v: v.std(ddof=1) / np.sqrt(paths)
 
-    print(f"\n-- does the path average reproduce what g promised? --")
-    print(f"T * edge (quadrature promise over {horizon // 12}y) ... {horizon * edge:+.4f} log")
+    print("\n-- average result across all paths --")
+    print(f"benchmark over {horizon // 12} years ................. {horizon * edge:+.4f} log")
     print(f"mean difference across paths ............ {diff.mean():+.4f} "
-          f"+/- {se(diff):.4f} (MC-SE)")
-    print("                                          ^ agrees: MC and quadrature")
-    print("                                            measure the same mean")
-    print(f"MEDIAN difference ....................... {np.median(diff):+.4f}   "
-          f"<- the hedge loses on")
-    print(f"                                             the typical path")
-    print(f"  (a no-jump path pays exactly T*log(1-c) = {horizon * np.log(1 - M.C):+.4f})")
+          f"+/- {se(diff):.4f}")
+    print("The simulated average agrees with the numerical benchmark.")
+    print(f"typical (median) difference .............. {np.median(diff):+.4f}")
+    print(f"With no jump, the hedge loses exactly {horizon * np.log(1 - M.C):+.4f} "
+          "from premiums.")
 
     win = (diff > 0).mean()
-    print(f"\n-- realized-path win rate: not reachable by quadrature --")
-    print(f"P(hedged beats unhedged on the path) .... {win:.2%} "
+    print("\n-- results experienced on individual paths --")
+    print(f"chance the hedge beats no hedge ......... {win:.2%} "
           f"+/- {np.sqrt(win * (1 - win) / paths):.2%}")
-    print(f"P(>=1 put ITM in {horizon} months) ............ {(n_itm >= 1).mean():.3%}"
+    print(f"chance the put pays at least once ............. {(n_itm >= 1).mean():.3%}"
           f"   (theory {1 - (1 - t['p_itm']) ** horizon:.3%})")
-    print(f"P(>=1 jump in {horizon} months) ............... {(n_jump >= 1).mean():.3%}"
+    print(f"chance any jump occurs ........................ {(n_jump >= 1).mean():.3%}"
           f"   (theory {1 - (1 - M.LAM) ** horizon:.3%})")
-    print("      ^ these last two are DIFFERENT quantities and must never be")
-    print("        reported as one. Only an in-the-money put can help; a jump")
-    print("        that does not breach the strike is just a loss. The win rate")
-    print("        tracks the ITM probability, not the jump probability.")
+    print("A jump does not always push the market below the put's strike. Only a jump")
+    print("large enough to make the put pay can help the hedge.")
 
-    print(f"\n-- conditioning on how many jumps the path saw --")
-    print(f"{'jumps':>8} {'share':>9} {'mean effect':>13} {'P(hedge helps)':>16}")
+    print("\n-- results grouped by the number of jumps --")
+    print(f"{'jumps':>8} {'paths':>9} {'average effect':>15} {'hedge wins':>16}")
     for label, mask in (("0", n_jump == 0), ("1", n_jump == 1), (">=2", n_jump >= 2)):
         d = diff[mask]
         print(f"{label:>8} {mask.mean():9.2%} {d.mean():+13.4f} {(d > 0).mean():15.1%}")
@@ -784,24 +770,24 @@ def e4(horizon=120, paths=400_000, n_track=5_000,
         q5, q95 = np.percentile(v, [5, 95])
         print(f"{label:10} {v.mean():+9.4f} {np.median(v):+9.4f} {q5:+9.4f} "
               f"{q95:+9.4f} {v.std(ddof=1):9.4f}")
-    print(f"\nsignal / path noise over the horizon ..... "
+    print(f"\naverage hedge effect / normal path spread  "
           f"{horizon * edge / x_h.std(ddof=1):.3f}")
-    print("      ^ the edge the whole estimation exercise was about is buried")
-    print("        roughly 5 deep in one bankroll's own path noise.")
+    print("The average benefit is small compared with the normal variation between")
+    print("individual bankroll paths.")
 
-    print(f"\n-- maximum drawdown (log), a running-extremum functional --")
-    print("   provably not a one-period expectation, so quadrature cannot reach it")
+    print("\n-- worst peak-to-trough loss on each path (in log units) --")
+    print("This depends on the order of monthly returns, so a one-month integral cannot calculate it.")
     qs = [50, 95, 99, 99.9]
     print(f"{'':10}" + "".join(f"{f'{q}%':>10}" for q in qs))
     for label, v in (("unhedged", dd_u), ("hedged", dd_h)):
         print(f"{label:10}" + "".join(f"{x:10.3f}" for x in np.percentile(v, qs)))
     worst_u, worst_h = np.percentile(dd_u, 99.9), np.percentile(dd_h, 99.9)
-    print(f"\nIdentical in the middle. At the 99.9th percentile the hedge converts a")
-    print(f"{1 - np.exp(-worst_u):.2%} wipeout into a {1 - np.exp(-worst_h):.2%} loss.")
-    print("This is the actual case for tail hedging and it is invisible in g by")
-    print("construction. Both columns are true at once: a positive geometric edge,")
-    print(f"and underperformance on {1 - win:.0%} of livable paths, because the mean is")
-    print(f"carried by the {win:.0%} where a put lands.")
+    print("\nTypical drawdowns are nearly identical. Among the worst 0.1% of paths,")
+    print(f"the hedge changes a {1 - np.exp(-worst_u):.2%} wipeout into a "
+          f"{1 - np.exp(-worst_h):.2%} loss.")
+    print(f"Both results are true: the average effect is positive, yet the hedge loses")
+    print(f"on {1 - win:.0%} of paths because its benefit comes from the {win:.0%} where")
+    print("a put pays.")
     _fair_pricing_note()
 
     if PLOTS:
@@ -838,7 +824,7 @@ def _e4_figure(traj_u, traj_h, x_u, x_h, diff, dd_u, dd_h, edge, win,
         ax_a.plot(months, q95, color=col, lw=1.0, ls="--")
         ax_a.plot(months, q50, color=col, label=f"{label}  (median, 5% and 95%)")
     ax_a.plot(months, months * (M.MU + edge), color=INK, ls="--", lw=1.4,
-              label="what $g_h$ promises: $T \\times g_h$")
+              label="average-growth benchmark")
     ax_a.set_xlim(0, horizon)
     ax_a.set_xlabel("months")
     ax_a.set_ylabel("cumulative log wealth")
@@ -866,7 +852,7 @@ def _e4_figure(traj_u, traj_h, x_u, x_h, diff, dd_u, dd_h, edge, win,
     ax_b.set_xlabel("hedged $-$ unhedged terminal log wealth, per path")
     ax_b.set_ylabel("paths (log scale)")
     _grid(ax_b)
-    _title(ax_b, f"B. A positive mean edge, and a loss on {1 - win:.0%} of paths")
+    _title(ax_b, f"B. The average improves, but {1 - win:.0%} of paths lose")
 
     # --- C. terminal wealth, and its left tail ---
     lo = min(np.percentile(x_u, 0.05), np.percentile(x_h, 0.05))
@@ -880,7 +866,7 @@ def _e4_figure(traj_u, traj_h, x_u, x_h, diff, dd_u, dd_h, edge, win,
     ax_c.set_ylabel("density (log scale)")
     ax_c.legend(loc="upper left")
     _grid(ax_c)
-    _title(ax_c, "C. Identical in the bulk; the hedge lives in the left tail")
+    _title(ax_c, "C. Typical outcomes are alike; the difference is in bad crashes")
 
     # --- D. the drawdown tail: the actual case for the hedge ---
     p_exceed = np.logspace(np.log10(0.5), np.log10(2e-4), 140)
@@ -901,16 +887,16 @@ def _e4_figure(traj_u, traj_h, x_u, x_h, diff, dd_u, dd_h, edge, win,
     ax_d.set_ylabel("share of paths that exceed it (%, log scale)")
     ax_d.legend(loc="lower left")
     _grid(ax_d)
-    _title(ax_d, "D. What the hedge is actually for: the drawdown tail")
+    _title(ax_d, "D. The hedge helps most in the worst drawdowns")
 
-    _suptitle(fig, "E4  The estimand choice dominates the estimator choice",
-              "Under iid returns quadrature beats every estimator in E2-E3 -- and "
-              "cannot reach a single quantity on this page.")
+    _suptitle(fig, "E4  A good average can hide what most investors experience",
+              "One-month calculations can find average growth, but they cannot find "
+              "win rates or worst losses along a multi-month path.")
     _note(fig, f"{FAIR_PRICING_FOOTER}\n{paths:,} paths over {horizon} months, "
                f"common random numbers: both bankrolls face the identical realized "
-               f"market, month by month. Signal / path noise over the horizon: "
-               f"{horizon * edge / x_h.std(ddof=1):.3f}.\nD is a running-extremum "
-               f"functional, which no one-period integral can reach.")
+               f"market, month by month. Average hedge effect / path spread: "
+               f"{horizon * edge / x_h.std(ddof=1):.3f}.\nMaximum drawdown depends "
+               f"on the order of returns and cannot be found from one-month averages.")
     _save(fig, outfile, top=0.94)
 
 
@@ -939,12 +925,12 @@ def e5(t_max=4096, paths=1200, hursts=(0.8, 0.1), ts=(256, 1024, 4096),
     H = 0.1 (rough, not persistent) the naive SE is fine, which localizes the
     effect to long memory specifically rather than to irregularity.
     """
-    _banner("e5", "the error bar lies (fGn-driven volatility)")
+    _banner("e5", "volatility memory makes ordinary error bars too small")
     rng = np.random.default_rng(SEEDS["e5"])
     g_true = M.lrd_g_true()
     print(f"seed {SEEDS['e5']}   T_max {t_max:,}   paths {paths:,}   "
           f"mu_a {M.MU_A}  sbar {M.SBAR}  xi {M.XI}")
-    print(f"g_true = mu_a - 0.5*sbar^2*exp(2*xi^2) = {g_true:+.5f}   (closed form)")
+    print(f"benchmark average growth = {g_true:+.5f}   (calculated exactly)")
 
     # The printed table stays on `ts` -- those are the numbers of record. The
     # figure walks a denser grid of the same prefixes, which costs nothing: the
@@ -970,11 +956,11 @@ def e5(t_max=4096, paths=1200, hursts=(0.8, 0.1), ts=(256, 1024, 4096),
         ac_r = np.corrcoef(r[:-lag].ravel(), r[lag:].ravel())[0, 1]
         ac_abs = np.corrcoef(np.abs(r[:-lag]).ravel(), np.abs(r[lag:]).ravel())[0, 1]
 
-        print(f"\nH = {h}  ({'long memory' if h > 0.5 else 'rough'})")
-        print(f"  corr(r_t, r_t+{lag}) = {ac_r:+.3f}   "
-              f"corr(|r_t|, |r_t+{lag}|) = {ac_abs:+.3f}")
-        print(f"  {'T':>6} {'mean est':>10} {'TRUE SE':>9} {'NAIVE SE':>9} "
-              f"{'ratio':>7} {'eff. N':>8}")
+        print(f"\nH = {h}  ({'persistent volatility' if h > 0.5 else 'quickly reversing volatility'})")
+        print(f"  return correlation after {lag} months ....... {ac_r:+.3f}")
+        print(f"  size correlation after {lag} months ......... {ac_abs:+.3f}")
+        print(f"  {'months':>6} {'mean':>10} {'real SE':>9} {'usual SE':>9} "
+              f"{'gap':>7} {'effective N':>11}")
         rows = []
         for tt in ts:
             block = r[:tt]
@@ -1000,12 +986,13 @@ def e5(t_max=4096, paths=1200, hursts=(0.8, 0.1), ts=(256, 1024, 4096),
         # the aggregated variance is back to the iid rate, so quoting 2H-2
         # there would be nonsense.
         ref = f", pure-LRD theory: {2 * h - 2:+.2f}" if h > 0.5 else ""
-        print(f"  Var(mean) ~ T^{slope:+.2f}    (iid: -1.00{ref})")
+        print(f"  variance of the mean changes as T^{slope:+.2f} "
+              f"(independent months: -1.00{ref})")
 
-    print("\nThe overconfidence ratio GROWS with T at H = 0.8: collecting more data")
-    print("makes the reported error bar worse, not better. At H = 0.1 the naive SE")
-    print("is essentially correct, so the effect is long memory specifically -- not")
-    print("roughness, and not fat tails, which are absent from this model entirely.")
+    print("\nWith persistent volatility (H = 0.8), the usual error bar becomes more")
+    print("overconfident as the record grows. With quickly reversing volatility")
+    print("(H = 0.1), it remains about right. The problem comes from persistence;")
+    print("this experiment does not include rare jumps or heavy tails.")
 
     if PLOTS:
         _e5_figure(curves, paths, outfile)
@@ -1045,29 +1032,29 @@ def _e5_figure(curves, paths, outfile):
     ax_a.set_xscale("log")
     ax_a.set_yscale("log")
     ax_a.set_xlabel("length of the backtest, T months")
-    ax_a.set_ylabel("standard error of the growth-rate estimate (log scale)")
+    ax_a.set_ylabel("uncertainty in estimated growth (log scale)")
     ax_a.legend(loc="lower left", fontsize=7.8)
     _grid(ax_a, axis="both", which="both")
-    _title(ax_a, "A. The reported error bar and the real one")
+    _title(ax_a, "A. Usual and actual uncertainty move apart")
 
     ax_b.axhline(1.0, color=INK, ls="--", lw=1.5)
     ax_b.set_xscale("log")      # before any axes-fraction text: log rescales x
     ax_b.set_xlabel("length of the backtest, T months")
-    ax_b.set_ylabel("true SE / reported SE  (overconfidence factor)")
+    ax_b.set_ylabel("actual uncertainty / reported uncertainty")
     ax_b.set_ylim(0, None)
     ax_b.legend(loc="upper left")
     _grid(ax_b)
-    ax_b.text(0.015, 0.92, "1x: an honest error bar", transform=ax_b.get_yaxis_transform(),
+    ax_b.text(0.015, 0.92, "1x: the error bar is accurate", transform=ax_b.get_yaxis_transform(),
               va="top", fontsize=8.2, color=INK)
-    _title(ax_b, "B. More data makes it worse")
+    _title(ax_b, "B. With persistent volatility, the gap grows with more data")
 
-    _suptitle(fig, "E5  The error bar lies, and lies harder with more data",
-              "Same estimator, same model, two ways of reporting its uncertainty.")
-    _note(fig, f"{paths:,} independent paths per H, exact fGn by Cholesky. Returns "
-               f"stay serially uncorrelated: memory enters only through the "
-               f"variance drag $\\sigma_t^2/2$. No fat tails in this model at all."
-               f"\nB slopes UP: every extra month of data makes the reported interval "
-               f"worse. Not a small-sample problem -- the opposite of one.")
+    _suptitle(fig, "E5  Volatility memory makes ordinary error bars too small",
+              "The usual formula assumes independent months. Persistent volatility "
+              "breaks that assumption.")
+    _note(fig, f"{paths:,} independent paths per H. Return direction remains "
+               f"uncorrelated; only volatility has memory. This model has no rare "
+               f"jumps.\nAn upward line in B means the reported error bar falls "
+               f"farther behind the actual uncertainty as more months are added.")
     _save(fig, outfile, top=0.90)
 
 
@@ -1087,9 +1074,9 @@ def e6(paths=200_000, hursts=(0.1, 0.3, 0.5, 0.7, 0.9),
     the whole claim lives past the 99th percentile, where a histogram has no
     resolution and no reader can count bars.
     """
-    _banner("E6", "the estimand -- drawdown against the family parameter H")
-    print("Log wealth is fBm with Hurst H; terminal variance is pinned across H,")
-    print("so H moves the SHAPE of the path and not its scale. Daily grid.\n")
+    _banner("E6", "how volatility memory changes extreme drawdowns")
+    print("Every Hurst setting has the same final variance. Changing H therefore")
+    print("changes the route each path takes, not its overall scale. Daily steps.\n")
     print(f"  {'H':>5} {'median':>9} {'99th':>9} {'99.9th':>9} {'ratio':>8}")
 
     rng = np.random.default_rng(606)
@@ -1102,11 +1089,12 @@ def e6(paths=200_000, hursts=(0.1, 0.3, 0.5, 0.7, 0.9),
         print(f"  {h:5.1f} {q50:8.2f}% {q99:8.2f}% {q999:8.2f}% {q999 / q50:7.1f}x")
 
     lo, hi = reads[max(hursts)], reads[min(hursts)]
-    print(f"\nThe 1-in-1000 drawdown runs from {lo:.1f}% at H = {max(hursts)} to "
+    print(f"\nThe drawdown exceeded by 1 path in 1,000 ranges from {lo:.1f}% at "
+          f"H = {max(hursts)} to "
           f"{hi:.1f}% at H = {min(hursts)}:")
-    print("rough paths spend the same terminal variance on far deeper round trips.")
-    print("No one-period integral reaches any of these numbers -- E4's point, now")
-    print("as a family. E7 asks whether either way of estimating one is honest.")
+    print("Quickly reversing paths make deeper peak-to-trough moves even though their")
+    print("final variance is the same. E7 checks whether two estimation methods put")
+    print("realistic error bars around these results.")
 
     if PLOTS:
         _e6_figure(curves, reads, paths, outfile)
@@ -1156,16 +1144,16 @@ def _e6_figure(curves, reads, paths, outfile):
     leg.get_title().set_fontsize(8.2)
     leg.get_title().set_color(INK_2)
     _grid(ax)
-    _title(ax, "Same terminal variance, and a 1-in-1000 drawdown that is not the same")
+    _title(ax, "Same final variance, very different worst drawdowns")
 
-    _suptitle(fig, "E6  One estimand, one family parameter",
-              "Log wealth is fBm of Hurst H, terminal variance pinned across H. "
-              "This is the number E7 tries to put an error bar on.")
+    _suptitle(fig, "E6  Volatility memory changes the path, not just the endpoint",
+              "All settings have the same final variance. The chart compares the "
+              "drawdown exceeded by one path in 1,000.")
     _note(fig, f"{paths:,} independent paths per H on the daily grid "
-               f"({M.DD_SUB} steps per month). Pinning Var X(T) across H means the "
-               f"sweep moves path shape, not scale.\nH is swept as a family "
-               f"parameter here, not calibrated: memory evidence gives H ~ 0.5 for "
-               f"S&P direction and 0.84-0.95 for its volatility.")
+               f"({M.DD_SUB} steps per month). Every H setting has the same final "
+               f"variance, so the comparison isolates path shape.\nThese H values "
+               f"are scenarios, not fitted values. The S&P evidence gives H ~ 0.5 "
+               f"for return direction and 0.84-0.95 for volatility.")
     _save(fig, outfile, top=0.90)
 
 
@@ -1230,14 +1218,14 @@ def e7(hursts=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9), m=8_000, reps=24,
     Cost note: this is the expensive experiment in the file (~4 min), because
     the window design needs a fresh multi-million-step record per rep.
     """
-    _banner("E7", "the honesty panel -- reported half-width over actual error")
+    _banner("E7", "do the reported error bars match the actual errors?")
     one_in = round(100.0 / (100.0 - M.DD_LEVEL))
-    print(f"Estimand: the 1-in-{one_in:,} drawdown of E6, "
+    print(f"Target: the drawdown exceeded by 1 path in {one_in:,}, over a "
           f"{M.DD_HORIZON}-month horizon.")
-    print(f"Both designs get m = {m:,} observations; {reps} reps each; "
-          f"truth from {ref_paths:,} daily-grid paths.\n")
-    print(f"  {'H':>5} {'truth':>8} | {'repl bias':>10} {'rmse':>8} {'reported':>9} "
-          f"{'RATIO':>6} | {'win bias':>9} {'rmse':>8} {'reported':>9} {'RATIO':>6}")
+    print(f"Both methods get {m:,} observations and are repeated {reps} times. The "
+          f"benchmark uses {ref_paths:,} paths with daily steps.\n")
+    print(f"  {'H':>5} {'benchmark':>9} | {'sim. diff':>10} {'error':>8} {'reported':>9} "
+          f"{'ratio':>6} | {'window diff':>11} {'error':>8} {'reported':>9} {'ratio':>6}")
 
     res = {"h": [], "replicate": [], "window": [], "bias": {}, "truth": []}
     for h in hursts:
@@ -1253,13 +1241,12 @@ def e7(hursts=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9), m=8_000, reps=24,
               f"{r['reported']:9.4f} {r['ratio']:6.2f} | {w['bias']:+9.4f} "
               f"{w['rmse']:8.4f} {w['reported']:9.4f} {w['ratio']:6.2f}")
 
-    print("\nThe replicate design fails on the LEFT: its error bar measures sampling")
-    print("noise, and its error is discretization bias, which no extra path removes.")
-    print("The window design fails on the RIGHT: its grid is right and its sample is")
-    print("dependent, so the bootstrap divides by an m it does not really have.")
-    print("Each is honest only where the other is not, and they cross at H ~ 0.65.")
-    print("Sweeping m over 4k/8k/16k moves both curves down and leaves the crossing")
-    print("where it is: more data does not buy honesty here, it spends it.")
+    print("\nThe independent-path method misses losses that happen between its monthly")
+    print("observations. More paths reduce random noise but cannot fix that coarse grid.")
+    print("The window method uses daily observations, but neighboring windows come from")
+    print("one dependent history. Its usual bootstrap acts as if they were independent.")
+    print("Each method reports realistic uncertainty only in part of the H range; the")
+    print("switch occurs near H = 0.65 and remains there at other sample sizes.")
 
     if PLOTS:
         _e7_figure(res, m, reps, outfile)
@@ -1303,17 +1290,17 @@ def _e7_figure(res, m, reps, outfile):
     ax.annotate("independent replicates\n(monthly grid)", (h[0], rep[0]),
                 textcoords="offset points", xytext=(9, -3), va="top",
                 fontsize=9, color=BLUE, fontweight="semibold")
-    ax.text(h[-1] + 0.02, 1.06, "honest", fontsize=8.4, color=INK,
+    ax.text(h[-1] + 0.02, 1.06, "accurate", fontsize=8.4, color=INK,
             ha="right", va="bottom")
 
     ax.set_xlabel("Hurst exponent $H$ of the bankroll")
-    ax.set_ylabel("reported half-width / the one that would cover (log scale)")
+    ax.set_ylabel("reported error range / range actually needed (log scale)")
     _grid(ax, axis="both")
-    _title(ax, "Each design is honest only where the other is not")
+    _title(ax, "Each method understates uncertainty in part of the H range")
 
-    _suptitle(fig, "E7  Neither error bar knows which half of the family it is in",
-              "The same estimand and the same sample size, estimated two ways. "
-              "Below the line is overconfidence.")
+    _suptitle(fig, "E7  Both methods can report error bars that are too small",
+              "The methods estimate the same drawdown with the same sample size. "
+              "Below the line, the reported range is smaller than the range needed.")
     _note(fig, f"m = {m:,} observations per estimate for BOTH designs, {reps} "
                f"independent runs per point; reported bar is an iid bootstrap 95% "
                f"half-width, verified calibrated on iid draws (T9).\nActual = 1.96 x "
@@ -1327,31 +1314,31 @@ def _e7_figure(res, m, reps, outfile):
 # ---------------------------------------------------------------------------
 def e8(trials=250, budget=16_384, horizon=256, strategy_paths=40_000,
        strategy_horizon=120, outfile=FIGURES / "unified_comparison.png"):
-    """Price and run one tail hedge under fat tails and transient memory."""
-    _banner("E8", "fat tails + transient memory + tail-hedge pricing")
+    """Price crash insurance, then test it on multi-month bankroll paths."""
+    _banner("E8", "full crash-insurance comparison")
     truth = M.tail_put_truth_and_cv()
-    print(f"Q price of one {M.RS_K:.0%}-strike monthly put ... {truth['price']:.8f}")
-    print(f"physical jump probability ................. {M.RS_LAM_P:.3%}")
-    print(f"risk-neutral jump probability ............. {M.RS_LAM_Q:.3%}")
-    print(f"IS proposal jump probability .............. {M.RS_LAM_IS:.1%}")
-    print(f"finite memory cutoff ...................... {M.MEM_CUTOFF} months")
-    print(f"pricing budget ............................ {budget:,} month-observations/run")
-    print(f"pricing horizon ........................... {horizon:,} months/path\n")
+    print(f"benchmark price of one {M.RS_K:.0%}-strike monthly put  {truth['price']:.8f}")
+    print(f"monthly crash chance in bankroll paths (P) .... {M.RS_LAM_P:.3%}")
+    print(f"monthly crash chance used for pricing (Q) ..... {M.RS_LAM_Q:.3%}")
+    print(f"crash chance used while oversampling .......... {M.RS_LAM_IS:.1%}")
+    print(f"volatility memory resets after ................ {M.MEM_CUTOFF} months")
+    print(f"simulation budget per pricing run ............. {budget:,} months")
+    print(f"length of each pricing path ................... {horizon:,} months\n")
 
     regimes = (
         (0.1, "rough H=.1"),
-        (0.5, "Brownian H=.5"),
+        (0.5, "memoryless H=.5"),
         (0.8, "persistent H=.8"),
         ((0.1, 0.8), "alternating .1/.8"),
     )
     methods = ("crude", "cv", "is", "cv_is")
-    labels = {"crude": "crude MC", "cv": "+ crash control",
-              "is": "+ importance sampling", "cv_is": "+ control + IS"}
+    labels = {"crude": "ordinary Monte Carlo", "cv": "+ crash control",
+              "is": "+ crash oversampling", "cv_is": "+ both methods"}
     pricing, strategy = {}, {}
 
-    print("PRICING UNDER Q -- same truth and same compute budget")
-    print(f"  {'regime':>18} {'method':>23} {'mean':>11} {'bias/SE':>9} "
-          f"{'sd':>11} {'variance reduction':>19}")
+    print("OPTION PRICING -- same benchmark and same simulation budget")
+    print(f"  {'regime':>18} {'method':>23} {'mean':>11} {'difference/SE':>13} "
+          f"{'spread':>11} {'noise improvement':>19}")
     for i, (h, regime_label) in enumerate(regimes):
         rng = np.random.default_rng(8080 + i)
         draws = M.run_price_trials(rng, trials, budget, horizon, h)
@@ -1369,7 +1356,7 @@ def e8(trials=250, budget=16_384, horizon=256, strategy_paths=40_000,
             print(f"  {regime_label:>18} {labels[name]:>23} {x.mean():11.8f} "
                   f"{z:+9.2f} {sd:11.8f} {vr:18.2f}x")
 
-    print("\nMEMORY CROSSOVER -- exact from the block-reset covariance")
+    print("\nVOLATILITY MEMORY -- local behavior before and after each reset")
     for h in M.REGIME_H:
         local_n = np.array([4, 8, 16, 32])
         long_n = M.MEM_CUTOFF * np.array([8, 16, 32, 64])
@@ -1377,12 +1364,12 @@ def e8(trials=250, budget=16_384, horizon=256, strategy_paths=40_000,
         long_v = np.array([M.regime_sum_variance(h, int(n)) for n in long_n])
         h_local = np.polyfit(np.log(local_n), np.log(local_v), 1)[0] / 2
         h_long = np.polyfit(np.log(long_n), np.log(long_v), 1)[0] / 2
-        print(f"  local H={h:.1f}: measured locally {h_local:.3f}, "
-              f"measured beyond cutoff {h_long:.3f}")
+        print(f"  chosen local H={h:.1f}: measured before reset {h_local:.3f}, "
+              f"measured over many regimes {h_long:.3f}")
 
-    print("\nROLLING HEDGE UNDER P -- premiums priced conditionally under Q")
-    print(f"  {'regime':>18} {'mean edge/mo':>14} {'P(hedge wins)':>15} "
-          f"{'99% DD unhedged':>18} {'99% DD hedged':>15}")
+    print("\nBANKROLL RESULTS -- puts priced with Q, outcomes generated with P")
+    print(f"  {'regime':>18} {'avg effect/month':>16} {'hedge wins':>15} "
+          f"{'99% drawdown, no hedge':>23} {'with hedge':>15}")
     for i, (h, regime_label) in enumerate(regimes):
         rng = np.random.default_rng(8180 + i)
         paths = M.tail_hedge_strategy_paths(
@@ -1399,10 +1386,10 @@ def e8(trials=250, budget=16_384, horizon=256, strategy_paths=40_000,
         print(f"  {regime_label:>18} {edge:+14.6f} {win:14.2%} "
               f"{dd_u:17.2f}% {dd_h:14.2f}%")
 
-    print("\nVariance reduction makes the Q price cheaper to estimate; it does not make")
-    print("the hedge profitable under P. Here Q assigns more crash mass than P, so the")
-    print("rolling hedge buys a tail-risk premium: it can reduce extreme drawdown while")
-    print("retaining negative mean carry.")
+    print("\nThe improved methods estimate the put price with less noise; they do not")
+    print("change whether the hedge makes money. The pricing model Q assumes more")
+    print("crashes than occur in the bankroll model P, so protection is expensive.")
+    print("The hedge loses money on average but reduces the most severe drawdowns.")
 
     result = {"truth": truth, "pricing": pricing, "strategy": strategy}
     if PLOTS:
@@ -1422,16 +1409,16 @@ def _e8_figure(result, regimes, budget, horizon, outfile):
     ax1.axvline(M.MEM_CUTOFF, color=MUTED, ls=":", lw=1.5)
     ax1.text(M.MEM_CUTOFF * 1.08, ax1.get_ylim()[0] * 1.7, "memory cutoff",
              color=MUTED, fontsize=9)
-    ax1.set_xlabel("aggregation horizon, months")
-    ax1.set_ylabel("Var(sum of volatility driver)")
-    _title(ax1, "A. Local scaling, long-run H = 1/2")
+    ax1.set_xlabel("time span, months")
+    ax1.set_ylabel("variance of accumulated volatility signal")
+    _title(ax1, "A. Local memory fades after repeated resets")
     ax1.legend(frameon=False, fontsize=9)
     _grid(ax1, axis="both", which="both")
 
     regime_labels = [label for _, label in regimes]
     x = np.arange(len(regime_labels))
     names = ("crude", "cv", "is", "cv_is")
-    labs = ("crude MC", "+ crash control", "+ IS", "+ control + IS")
+    labs = ("ordinary MC", "+ crash control", "+ oversampling", "+ both")
     colors = (MUTED, ORANGE, BLUE, VIOLET)
     width = 0.19
     for j, (name, lab, color) in enumerate(zip(names, labs, colors)):
@@ -1441,9 +1428,9 @@ def _e8_figure(result, regimes, budget, horizon, outfile):
     ax2.set_yscale("log")
     ax2.set_xticks(x)
     ax2.set_xticklabels(("H=.1", "H=.5", "H=.8", ".1/.8"))
-    ax2.set_ylabel("variance reduction vs crude MC")
+    ax2.set_ylabel("noise improvement over ordinary Monte Carlo")
     ax2.set_xlabel("local volatility regime")
-    _title(ax2, "B. Same Q price, four estimators")
+    _title(ax2, "B. Four methods estimate the same put price")
     ax2.legend(frameon=False, fontsize=8, loc="upper left")
     _grid(ax2)
 
@@ -1459,18 +1446,20 @@ def _e8_figure(result, regimes, budget, horizon, outfile):
     ax3.set_ylim(0, max(dd_u) + 13)
     ax3.set_xticks(x)
     ax3.set_xticklabels(("H=.1", "H=.5", "H=.8", ".1/.8"))
-    ax3.set_ylabel("99th-percentile max drawdown (% wealth)")
+    ax3.set_ylabel("99th-percentile worst drawdown (% of wealth)")
     ax3.set_xlabel("local volatility regime")
-    _title(ax3, "C. Q price versus P bankroll outcome")
+    _title(ax3, "C. The hedge reduces severe drawdowns but usually loses")
     ax3.legend(frameon=False, fontsize=9)
     _grid(ax3)
 
-    _suptitle(fig, "E8  The unified experiment",
-              "Fat tails, transient market memory, a Q-priced rolling tail hedge, and equal-budget Monte Carlo.")
+    _suptitle(fig, "E8  Pricing crash insurance and testing the result",
+              "Four equal-budget pricing methods, finite volatility memory, and "
+              "multi-year bankroll outcomes.")
     _note(fig, f"Pricing truth {result['truth']['price']:.8f}; {budget:,} month-observations per run, "
-               f"{horizon}-month paths. Memory is in volatility and resets after {M.MEM_CUTOFF} months, "
-               "so local H can differ from 1/2 without asserting permanent anomalous scaling. "
-               f"Q crash probability {M.RS_LAM_Q:.3%} vs P {M.RS_LAM_P:.3%}.")
+               f"{horizon}-month paths. Volatility memory resets after "
+               f"{M.MEM_CUTOFF} months, so short-run persistence need not last "
+               f"forever. Pricing crash chance (Q): {M.RS_LAM_Q:.3%}; bankroll "
+               f"crash chance (P): {M.RS_LAM_P:.3%}.")
     _save(fig, outfile, top=0.86)
 
 
