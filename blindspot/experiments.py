@@ -908,9 +908,8 @@ def e5(t_max=4096, paths=1200, hursts=(0.8, 0.1), ts=(256, 1024, 4096),
     """Long-memory volatility makes the reported confidence interval dishonest.
 
     The first experiment whose estimand is genuinely path-space rather than a
-    disguised one-period expectation. Returns remain serially UNCORRELATED,
-    matching the stylized fact; memory enters the growth estimand only through
-    the variance drag sigma_t^2/2.
+    disguised one-period expectation. Simple returns have a constant conditional
+    mean, but log returns inherit memory through variance drag sigma_t^2/2.
 
     Two standard errors are compared for the same estimator (the time average
     of log growth over one path, i.e. one backtest):
@@ -949,16 +948,17 @@ def e5(t_max=4096, paths=1200, hursts=(0.8, 0.1), ts=(256, 1024, 4096),
         sig = M.SBAR * np.exp(M.XI * g)
         r = M.MU_A - 0.5 * sig**2 + sig * rng.standard_normal((t_max, paths))
 
-        # Sanity: the returns themselves must stay uncorrelated while their
-        # magnitudes cluster. If the first were nonzero the model would be a
-        # forecastability artefact rather than a long-memory one.
-        lag = 100
-        ac_r = np.corrcoef(r[:-lag].ravel(), r[lag:].ravel())[0, 1]
-        ac_abs = np.corrcoef(np.abs(r[:-lag]).ravel(), np.abs(r[lag:]).ravel())[0, 1]
-
         print(f"\nH = {h}  ({'persistent volatility' if h > 0.5 else 'quickly reversing volatility'})")
-        print(f"  return correlation after {lag} months ....... {ac_r:+.3f}")
-        print(f"  size correlation after {lag} months ......... {ac_abs:+.3f}")
+        # Short lags reveal the log-return dependence that a lag-100 check misses.
+        for lag in (1, 100):
+            if lag >= t_max:
+                continue
+            ac_r = np.corrcoef(r[:-lag].ravel(), r[lag:].ravel())[0, 1]
+            ac_abs = np.corrcoef(np.abs(r[:-lag]).ravel(), np.abs(r[lag:]).ravel())[0, 1]
+            theory = M.lrd_log_return_correlation(h, lag)
+            print(f"  log-return correlation, lag {lag:3d} ..... {ac_r:+.3f} "
+                  f"(theory {theory:+.3f})")
+            print(f"  size correlation, lag {lag:3d} ........... {ac_abs:+.3f}")
         print(f"  {'months':>6} {'mean':>10} {'real SE':>9} {'usual SE':>9} "
               f"{'gap':>7} {'effective N':>11}")
         rows = []
@@ -1051,8 +1051,8 @@ def _e5_figure(curves, paths, outfile):
     _suptitle(fig, "E5  Volatility memory makes ordinary error bars too small",
               "The usual formula assumes independent months. Persistent volatility "
               "breaks that assumption.")
-    _note(fig, f"{paths:,} independent paths per H. Return direction remains "
-               f"uncorrelated; only volatility has memory. This model has no rare "
+    _note(fig, f"{paths:,} independent paths per H. Log returns inherit volatility "
+               f"memory through variance drag; normal shocks are independent. No rare "
                f"jumps.\nAn upward line in B means the reported error bar falls "
                f"farther behind the actual uncertainty as more months are added.")
     _save(fig, outfile, top=0.90)
@@ -1160,6 +1160,35 @@ def _e6_figure(curves, reads, paths, outfile):
 # ---------------------------------------------------------------------------
 # E7 -- the honesty panel (the headline)
 # ---------------------------------------------------------------------------
+def _interval_diagnostics(estimates, halfwidths, benchmark):
+    """Measure coverage of each reported interval; keep RMSE as a diagnostic."""
+    est = np.asarray(estimates, dtype=float)
+    rep = np.asarray(halfwidths, dtype=float)
+    if est.ndim != 1 or est.size < 2 or rep.shape != est.shape:
+        raise ValueError("at least two estimates and matching half-widths are required")
+    lower, upper = est - rep, est + rep
+    covered = (lower <= benchmark) & (benchmark <= upper)
+    coverage = float(covered.mean())
+    # Wilson 95% bounds show sampling uncertainty even at 0% or 100% coverage.
+    n, z = est.size, 1.96
+    denom = 1.0 + z**2 / n
+    center = (coverage + z**2 / (2 * n)) / denom
+    radius = z * np.sqrt(coverage * (1 - coverage) / n + z**2 / (4 * n**2)) / denom
+    rmse = float(np.sqrt(np.mean((est - benchmark) ** 2)))
+    return {
+        "estimates": est, "halfwidths": rep,
+        "interval_lower": lower, "interval_upper": upper, "covered": covered,
+        "coverage": coverage,
+        # At 0%/100%, roundoff can otherwise put an endpoint just inside the
+        # point estimate and turn a plotted error length negative.
+        "coverage_lo": float(min(coverage, max(0.0, center - radius))),
+        "coverage_hi": float(max(coverage, min(1.0, center + radius))),
+        "bias": float(est.mean() - benchmark), "sd": float(est.std(ddof=1)),
+        "rmse": rmse, "reported": float(rep.mean()),
+        "rmse_ratio": float(rep.mean() / (1.96 * rmse)) if rmse else float("nan"),
+    }
+
+
 def e7_point(h, m=8_000, reps=24, ref_paths=200_000, seed=707):
     """One H of E7: truth, then both designs, each over `reps` full runs.
 
@@ -1168,6 +1197,8 @@ def e7_point(h, m=8_000, reps=24, ref_paths=200_000, seed=707):
     what makes the robustness sweep in `e7`'s docstring a comparison rather
     than a reshuffle.
     """
+    if reps < 2:
+        raise ValueError("reps must be at least two to measure interval uncertainty")
     rng = np.random.default_rng(seed + int(round(h * 100)))
     truth = float(np.percentile(
         M.drawdown_replicates(h, ref_paths, rng, sub=M.DD_SUB), M.DD_LEVEL))
@@ -1179,11 +1210,7 @@ def e7_point(h, m=8_000, reps=24, ref_paths=200_000, seed=707):
                  else M.drawdown_windows(h, m, rng))
             est.append(np.percentile(s, M.DD_LEVEL))
             rep.append(M.bootstrap_halfwidth(s, rng))
-        est = np.asarray(est)
-        rmse = float(np.sqrt(((est - truth) ** 2).mean()))
-        row[kind] = {"bias": float(est.mean() - truth), "sd": float(est.std(ddof=1)),
-                     "rmse": rmse, "reported": float(np.mean(rep)),
-                     "ratio": float(np.mean(rep) / (1.96 * rmse))}
+        row[kind] = _interval_diagnostics(est, rep, truth)
     return row
 
 
@@ -1202,18 +1229,14 @@ def e7(hursts=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9), m=8_000, reps=24,
       single-path windows -- one realized record at DAILY resolution, cut into
         `m` consecutive windows.  Right grid, dependent sample.
 
-    Both report an iid bootstrap 95% half-width.  Against that we put the
-    half-width that would ACTUALLY have covered: 1.96 x the rmse of the
-    estimator around the truth, over `reps` independent runs of the whole
-    design.  Ratio 1 is an honest error bar; below 1 is overconfidence.
+    Each interval is estimate +/- 1.96 times its iid-bootstrap standard error.
+    We count the intervals containing the daily-grid Monte Carlo benchmark
+    and give Wilson bounds for this coverage rate across independent runs.
+    The benchmark itself has simulation error, which these bounds exclude.
 
-    Robustness, because a crossing is the kind of result that is easy to tune
-    into existence. Sweeping m over 4k / 8k / 16k moves both curves DOWN --
-    at H = 0.5 the window design runs 1.07, 1.04, 0.74 -- but the crossing
-    stays put between H = 0.6 and 0.7 throughout. So the location is a
-    property of the family and the level is a property of the budget: more
-    data does not buy honesty here, it spends it, which is E5's finding
-    arriving again through a completely different door.
+    Mean reported half-width / (1.96 x RMSE) remains a separate scale
+    diagnostic. It does not establish 95% coverage for biased or skewed errors.
+    The returned per-run estimates and interval bounds allow further checks.
 
     Cost note: this is the expensive experiment in the file (~4 min), because
     the window design needs a fresh multi-million-step record per rep.
@@ -1224,29 +1247,35 @@ def e7(hursts=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9), m=8_000, reps=24,
           f"{M.DD_HORIZON}-month horizon.")
     print(f"Both methods get {m:,} observations and are repeated {reps} times. The "
           f"benchmark uses {ref_paths:,} paths with daily steps.\n")
-    print(f"  {'H':>5} {'benchmark':>9} | {'sim. diff':>10} {'error':>8} {'reported':>9} "
-          f"{'ratio':>6} | {'window diff':>11} {'error':>8} {'reported':>9} {'ratio':>6}")
+    print("Intervals: estimate +/- 1.96 x bootstrap SE; nominal coverage 95%.")
+    print("Coverage bounds measure uncertainty across runs, excluding benchmark error.")
+    print(f"  {'H':>5} {'method':>10} {'bias':>9} {'RMSE':>9} {'half-width':>10} "
+          f"{'coverage':>9} {'95% coverage bounds':>21} {'width/1.96RMSE':>15}")
 
-    res = {"h": [], "replicate": [], "window": [], "bias": {}, "truth": []}
+    res = {"h": [], "replicate": [], "window": [], "bias": {}, "truth": [],
+           "coverage": {"replicate": [], "window": []}}
     for h in hursts:
         row = e7_point(h, m=m, reps=reps, ref_paths=ref_paths, seed=seed)
         for kind in ("replicate", "window"):
-            res[kind].append(row[kind]["ratio"])
+            res[kind].append(row[kind]["rmse_ratio"])
+            res["coverage"][kind].append(row[kind]["coverage"])
         res["h"].append(h)
         res["truth"].append(row["truth"])
         res["bias"][h] = row
-        truth = row["truth"]
-        r, w = row["replicate"], row["window"]
-        print(f"  {h:5.1f} {truth:8.4f} | {r['bias']:+10.4f} {r['rmse']:8.4f} "
-              f"{r['reported']:9.4f} {r['ratio']:6.2f} | {w['bias']:+9.4f} "
-              f"{w['rmse']:8.4f} {w['reported']:9.4f} {w['ratio']:6.2f}")
+        print(f"  H={h:.1f} benchmark={row['truth']:.4f}")
+        for kind in ("replicate", "window"):
+            r = row[kind]
+            bounds = f"[{r['coverage_lo']:.1%}, {r['coverage_hi']:.1%}]"
+            print(f"  {h:5.1f} {kind:>10} {r['bias']:+9.4f} {r['rmse']:9.4f} "
+                  f"{r['reported']:10.4f} {r['coverage']:9.1%} {bounds:>21} "
+                  f"{r['rmse_ratio']:15.2f}")
 
     print("\nThe independent-path method misses losses that happen between its monthly")
     print("observations. More paths reduce random noise but cannot fix that coarse grid.")
     print("The window method uses daily observations, but neighboring windows come from")
     print("one dependent history. Its usual bootstrap acts as if they were independent.")
-    print("Each method reports realistic uncertainty only in part of the H range; the")
-    print("switch occurs near H = 0.65 and remains there at other sample sizes.")
+    print("Measured coverage checks those intervals directly. The width/RMSE ratio")
+    print("compares scales only; its crossings do not establish interval calibration.")
 
     if PLOTS:
         _e7_figure(res, m, reps, outfile)
@@ -1254,58 +1283,46 @@ def e7(hursts=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9), m=8_000, reps=24,
 
 
 def _e7_figure(res, m, reps, outfile):
-    """One panel, two curves, one honest line at 1.
-
-    Log y: the failures are multiplicative and run from ~0.1x to ~1x, so a
-    linear axis would compress the entire left-hand failure into the bottom
-    tenth of the frame and draw "8x overconfident" as indistinguishable from
-    "3x overconfident".
-    """
+    """Measured coverage and the separate width/RMSE scale diagnostic."""
     plt = _mpl()
-    fig, ax = plt.subplots(1, 1, figsize=(9.4, 6.2))
+    fig, (ax_cov, ax_ratio) = plt.subplots(1, 2, figsize=(13.6, 5.6))
     h = np.asarray(res["h"])
-    rep, win = np.asarray(res["replicate"]), np.asarray(res["window"])
+    for kind, col, label, offset in (
+        ("replicate", BLUE, "independent paths (monthly)", -0.008),
+        ("window", ORANGE, "single-path windows (daily)", 0.008),
+    ):
+        rows = [res["bias"][hh][kind] for hh in h]
+        coverage = 100 * np.array([r["coverage"] for r in rows])
+        lo = 100 * np.array([r["coverage_lo"] for r in rows])
+        hi = 100 * np.array([r["coverage_hi"] for r in rows])
+        ax_cov.errorbar(h + offset, coverage, yerr=[coverage - lo, hi - coverage],
+                        fmt="o-", color=col, ms=5, capsize=3, label=label)
+        ax_ratio.plot(h, res[kind], "o-", color=col, ms=5, label=label)
 
-    ax.set_yscale("log")
-    ax.set_xlim(h[0] - 0.035, h[-1] + 0.035)
-    ax.set_ylim(0.05, 2.4)
-    # Shade below the honest line rather than annotating "overconfident" twice:
-    # once the reader knows which side is bad, every crossing reads itself.
-    ax.axhspan(0.05, 1.0, color=GRID, alpha=0.35, lw=0)
-    ax.axhline(1.0, color=INK, ls="--", lw=1.5)
+    ax_cov.axhline(95, color=INK, ls="--", lw=1.5, label="nominal 95% coverage")
+    ax_cov.set_ylim(-3, 108)
+    ax_cov.set_ylabel("intervals containing the benchmark (%)")
+    ax_cov.legend(loc="center left", bbox_to_anchor=(0.01, 0.45), fontsize=8)
+    _title(ax_cov, "A. Measured coverage, with 95% Wilson bounds")
 
-    # The measured exponent for S&P direction, from docs/memory_evidence.md.
-    # it is where a reader actually stands, and both designs are wrong there.
-    ax.axvline(0.49, color=MUTED, ls=":", lw=1.4)
-    ax.annotate("S&P direction,\nmeasured", (0.49, 0.058),
-                xycoords=("data", "data"), textcoords="offset points",
-                xytext=(-7, 0), ha="right", va="bottom", fontsize=8.2,
-                color=MUTED, multialignment="right")
+    ax_ratio.axhline(1.0, color=INK, ls="--", lw=1.5, label="equal scales")
+    ax_ratio.set_yscale("log")
+    ax_ratio.set_ylabel("mean half-width / (1.96 × RMSE), log scale")
+    ax_ratio.legend(loc="lower right", fontsize=8)
+    _title(ax_ratio, "B. Width versus RMSE: a scale diagnostic")
+    for ax in (ax_cov, ax_ratio):
+        ax.set_xlim(h[0] - 0.035, h[-1] + 0.035)
+        ax.set_xlabel("Hurst exponent $H$ of the bankroll")
+        _grid(ax, axis="both")
 
-    ax.plot(h, rep, "o-", color=BLUE, ms=6)
-    ax.plot(h, win, "o-", color=ORANGE, ms=6)
-    ax.annotate("single-path windows\n(daily grid)", (h[0], win[0]),
-                textcoords="offset points", xytext=(9, 5), va="bottom",
-                fontsize=9, color=ORANGE, fontweight="semibold")
-    ax.annotate("independent replicates\n(monthly grid)", (h[0], rep[0]),
-                textcoords="offset points", xytext=(9, -3), va="top",
-                fontsize=9, color=BLUE, fontweight="semibold")
-    ax.text(h[-1] + 0.02, 1.06, "accurate", fontsize=8.4, color=INK,
-            ha="right", va="bottom")
-
-    ax.set_xlabel("Hurst exponent $H$ of the bankroll")
-    ax.set_ylabel("reported error range / range actually needed (log scale)")
-    _grid(ax, axis="both")
-    _title(ax, "Each method understates uncertainty in part of the H range")
-
-    _suptitle(fig, "E7  Both methods can report error bars that are too small",
-              "The methods estimate the same drawdown with the same sample size. "
-              "Below the line, the reported range is smaller than the range needed.")
+    _suptitle(fig, "E7  Checking drawdown intervals against repeated runs",
+              "Coverage counts the reported intervals that contain the benchmark. "
+              "The width/RMSE ratio measures a separate property.")
     _note(fig, f"m = {m:,} observations per estimate for BOTH designs, {reps} "
-               f"independent runs per point; reported bar is an iid bootstrap 95% "
-               f"half-width, verified calibrated on iid draws (T9).\nActual = 1.96 x "
-               f"rmse around the truth, so bias counts. Windows are non-overlapping, "
-               f"which is the charitable case: at H = 1/2 they are exactly iid.")
+               f"independent runs per point. Intervals use estimate ± 1.96 × "
+               f"iid-bootstrap SE; windows are non-overlapping.\nCoverage is against "
+               f"a simulated daily-grid benchmark; its uncertainty is excluded. "
+               f"A width/RMSE ratio of 1 does not imply 95% coverage.")
     _save(fig, outfile, top=0.90)
 
 

@@ -168,8 +168,19 @@ python -m venv .venv
 
 The experiments use fixed random seeds, so results can be reproduced. E8 uses
 seeds 8080–8083 for pricing and 8180–8183 for bankroll paths. The test suite
-contains 15 checks of expected numerical behavior and five guards against bugs
+contains 17 checks of expected numerical behavior and eight guards against bugs
 found during development.
+
+E5 keeps the conditional mean of simple returns constant, while its log
+returns inherit volatility memory through variance drag. Its diagnostics
+report log-return correlations at lags 1 and 100 alongside their theoretical
+values.
+
+E7 retains every run's estimate and reported interval, then measures how often
+those intervals contain the simulated daily-grid benchmark. The chart shows
+95% Wilson bounds for that coverage rate. Benchmark simulation uncertainty is
+excluded. The separate half-width/(1.96 × RMSE) ratio compares scales and does
+not establish 95% interval coverage.
 
 ## Files
 
@@ -180,7 +191,7 @@ found during development.
 | `blindspot/memory.py` | methods for estimating the Hurst exponent |
 | `blindspot/sp500_memory.py` | memory estimates from S&P 500 data |
 | `blindspot/stable_tail.py` | corrected reference code from an earlier model |
-| `tests/test_regressions.py` | numerical checks T1–T15 and bug guards B1–B5 |
+| `tests/test_regressions.py` | numerical checks T1–T17 and bug guards B1–B8 |
 | `docs/memory_evidence.md` | evidence for putting memory in volatility |
 | `figures/` | generated charts |
 | `data/` | downloaded data that can be recreated |
@@ -194,8 +205,9 @@ found during development.
 - The crash probabilities, 64-month reset, jump size, strike, and monthly spend
   are scenario choices. They should be varied before drawing financial
   conclusions.
-- Only volatility has memory. The model does not try to predict whether the
-  next return will be positive or negative.
+- Memory is introduced through volatility in E5 and E8. Their log returns
+  inherit dependence through volatility-dependent drift. E6–E7 use a separate
+  fBm bankroll family to stress-test drawdown estimators.
 - Real market regimes do not necessarily end on an exact 64-month schedule;
   the reset is a clear way to model finite memory.
 - Estimates of extreme drawdowns need their own uncertainty ranges before they

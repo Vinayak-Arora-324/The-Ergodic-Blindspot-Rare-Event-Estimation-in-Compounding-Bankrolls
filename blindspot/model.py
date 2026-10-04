@@ -387,9 +387,9 @@ def fgn_cholesky(hurst, t_max):
     return np.linalg.cholesky(cov + 1e-10 * np.eye(t_max))
 
 
-# E5's volatility model.  Returns stay serially UNcorrelated (matching the
-# stylized fact); long memory enters the *growth* estimand only through the
-# variance drag sigma_t^2 / 2.
+# E5's volatility model. Simple returns have constant conditional expectation,
+# but log returns inherit serial dependence through variance drag sigma_t^2/2.
+# The independent normal shocks themselves have no serial dependence.
 #
 #     r_t     = MU_A - sigma_t^2/2 + sigma_t * Z_t,   Z iid N(0,1)
 #     log sig = log(SBAR) + XI * G_t,                 G = fGn with Hurst H
@@ -404,6 +404,18 @@ XI = 0.9
 def lrd_g_true(mu_a=MU_A, sbar=SBAR, xi=XI):
     """Closed-form growth rate of the fGn-vol model: mu_a - 0.5*sbar^2*exp(2*xi^2)."""
     return mu_a - 0.5 * sbar**2 * np.exp(2 * xi**2)
+
+
+def lrd_log_return_correlation(hurst, lag, sbar=SBAR, xi=XI):
+    """Exact E5 log-return correlation induced by the volatility-dependent drift."""
+    if lag < 1 or int(lag) != lag or not 0 < hurst < 1:
+        raise ValueError("lag must be a positive integer and H must lie in (0, 1)")
+    gamma = 0.5 * ((lag + 1) ** (2 * hurst) - 2 * lag ** (2 * hurst)
+                   + abs(lag - 1) ** (2 * hurst))
+    sigma2_mean = sbar**2 * np.exp(2 * xi**2)
+    cov = 0.25 * sigma2_mean**2 * np.expm1(4 * xi**2 * gamma)
+    var = sigma2_mean + 0.25 * sigma2_mean**2 * np.expm1(4 * xi**2)
+    return float(cov / var)
 
 
 # ---------------------------------------------------------------------------
@@ -562,12 +574,10 @@ def drawdown_windows(hurst, n_windows, rng, sub=DD_SUB):
 def bootstrap_halfwidth(sample, rng, level=DD_LEVEL, boot=400):
     """The 95% half-width an iid bootstrap reports for a percentile.
 
-    The bootstrap is the right bar to indict rather than a parametric formula:
-    it assumes no distributional shape at all, it is what a careful
-    practitioner actually quotes, and it is still wrong in E7 -- because
-    resampling a sample cannot recover structure the sample does not know it
-    has.  Verified calibrated (0.9-1.1x) against the true sd on genuinely iid
-    draws from this family, at both grids, in T9.
+    This is a normal-approximation interval using a bootstrap standard error,
+    not a bootstrap percentile interval. T9 compares its estimated standard
+    error with the sampling sd on iid draws. E7 separately measures interval
+    coverage; matching standard errors alone does not establish 95% coverage.
     """
     idx = rng.integers(0, sample.size, size=(boot, sample.size))
     return 1.96 * np.percentile(sample[idx], level, axis=1).std(ddof=1)

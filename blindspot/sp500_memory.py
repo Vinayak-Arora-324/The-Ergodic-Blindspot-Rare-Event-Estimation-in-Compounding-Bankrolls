@@ -16,6 +16,7 @@ could make ordinary volatility clustering look like directional memory.
 
 import argparse
 import os
+import tempfile
 
 import numpy as np
 import pandas as pd
@@ -54,7 +55,45 @@ ESTIMATORS = {
 # ---------------------------------------------------------------------------
 # Data
 # ---------------------------------------------------------------------------
+def _prepare_prices(prices, start, end):
+    """Clean prices and select [start, end), matching the download API."""
+    out = pd.to_numeric(prices, errors="coerce")
+    out.index = pd.to_datetime(out.index, errors="coerce")
+    if out.index.tz is not None:
+        out.index = out.index.tz_localize(None)
+    out = out[out.index.notna()].dropna().sort_index()
+    if not np.isfinite(out).all() or (out <= 0).any():
+        raise ValueError("prices must be finite and strictly positive")
+    if start is not None:
+        out = out[out.index >= start]
+    if end is not None:
+        out = out[out.index < end]
+    if out.empty:
+        raise ValueError("no valid prices in the requested date range")
+    return out
+
+
+def _save_prices(prices):
+    """Replace the cache atomically after the prices have been validated."""
+    parent = os.path.dirname(CACHE)
+    os.makedirs(parent, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=parent,
+                                         suffix=".csv", delete=False) as handle:
+            temporary = handle.name
+            prices.to_csv(handle, header=["Close"], index_label="Date")
+        os.replace(temporary, CACHE)
+    finally:
+        if temporary is not None and os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def load_prices(start, end, allow_download=True):
+    start = pd.Timestamp(start) if start is not None else None
+    end = pd.Timestamp(end) if end is not None else None
+    if start is not None and end is not None and start >= end:
+        raise ValueError("start must be before end (end is exclusive)")
     if allow_download:
         try:
             import yfinance as yf
@@ -64,9 +103,8 @@ def load_prices(start, end, allow_download=True):
             close = df["Close"]
             if isinstance(close, pd.DataFrame):
                 close = close.iloc[:, 0]
-            close = close.dropna()
-            os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-            close.to_csv(CACHE, header=["Close"], index_label="Date")
+            close = _prepare_prices(close, start, end)
+            _save_prices(close)
             print(f"Downloaded {len(close)} rows -> {os.path.basename(CACHE)}")
             return close
         except Exception as exc:
@@ -78,9 +116,10 @@ def load_prices(start, end, allow_download=True):
                          "--no-download once.")
     s = pd.read_csv(CACHE, index_col=0)
     col = "Close" if "Close" in s.columns else s.columns[0]
-    out = pd.to_numeric(s[col], errors="coerce")
-    out.index = pd.to_datetime(out.index, errors="coerce")
-    out = out[out.index.notna()].dropna().sort_index()
+    try:
+        out = _prepare_prices(s[col], start, end)
+    except ValueError as exc:
+        raise SystemExit(f"Cached data cannot satisfy the request: {exc}") from exc
     print(f"Loaded {len(out)} cached rows")
     return out
 
@@ -174,8 +213,12 @@ def figure(returns, vol, rows_r, rows_v, path):
         hi = np.array([r["hi"] for r in rows])
         nm = np.array([r["null_mean"] for r in rows])
         ns = np.array([r["null_sd"] for r in rows])
-        ax2.errorbar(pts, y + off, xerr=[pts - lo, hi - pts], fmt="o",
-                     color=c, ms=6, capsize=3, label=lab, zorder=3)
+        # A percentile interval may exclude the original point estimate.
+        # Draw its endpoints independently instead of making negative errors.
+        ax2.hlines(y + off, lo, hi, color=c, zorder=3)
+        ax2.vlines(lo, y + off - 0.035, y + off + 0.035, color=c, zorder=3)
+        ax2.vlines(hi, y + off - 0.035, y + off + 0.035, color=c, zorder=3)
+        ax2.plot(pts, y + off, "o", color=c, ms=6, label=lab, zorder=4)
         for yy, m, s in zip(y + off, nm, ns):
             ax2.add_patch(plt.Rectangle((m - 2 * s, yy - 0.09), 4 * s, 0.18,
                                         color=c, alpha=0.18, zorder=1))
@@ -190,10 +233,10 @@ def figure(returns, vol, rows_r, rows_v, path):
     ax2.grid(alpha=0.3, axis="x")
     ax2.set_ylim(-0.6, len(names) - 0.4)
 
-    fig.suptitle("S&P 500, 1990-2026: no memory in direction, strong memory "
-                 "in volatility", fontsize=12)
+    fig.suptitle("S&P 500: memory in returns and volatility", fontsize=12)
     fig.tight_layout()
     fig.savefig(path, dpi=140)
+    plt.close(fig)
     print(f"\nWrote {os.path.basename(path)}")
 
 
