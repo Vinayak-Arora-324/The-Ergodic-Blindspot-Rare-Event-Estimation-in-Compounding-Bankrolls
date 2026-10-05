@@ -5,15 +5,18 @@
     python -m blindspot.experiments all         # run all and write figures
     python -m blindspot.experiments all --no-plots
 
-E1-E7 each explain one way a simulation or its error bar can mislead us. E8
-combines them in one crash-insurance example.
+E4 is the main experiment: it follows hedged and unhedged bankrolls along
+400,000 ten-year paths and shows that the rolling crash hedge greatly reduces
+the worst drawdowns and raises average log growth, while paying its premium on
+every path. The other experiments are side experiments that test how far the
+simulated numbers and their error bars can be trusted. See docs/documentation.md.
 
   E1  rare payoffs          -- most small runs miss the event, even though the
                                average across many runs is correct.
   E2  sources of noise      -- shows where simulation noise comes from and why
                                one noise-reduction method hurts when used alone.
   E3  convergence           -- compares how quickly the methods become precise.
-  E4  bankroll paths        -- compares averages with the outcomes experienced
+  E4  bankroll paths [MAIN] -- compares averages with the outcomes experienced
                                along individual multi-month paths.
   E5  misleading error bars -- shows how volatility memory breaks an error
                                formula that assumes independent months.
@@ -1158,7 +1161,7 @@ def _e6_figure(curves, reads, paths, outfile):
 
 
 # ---------------------------------------------------------------------------
-# E7 -- the honesty panel (the headline)
+# E7 -- the honesty panel (side experiment)
 # ---------------------------------------------------------------------------
 def _interval_diagnostics(estimates, halfwidths, benchmark):
     """Measure coverage of each reported interval; keep RMSE as a diagnostic."""
@@ -1487,7 +1490,7 @@ EXPERIMENTS = {
     "e1": (e1, "rare payoff -> figures/rare_payoff.png"),
     "e2": (e2, "variance methods -> figures/variance_methods.png"),
     "e3": (e3, "convergence -> figures/convergence.png"),
-    "e4": (e4, "bankroll paths -> figures/bankroll_paths.png"),
+    "e4": (e4, "MAIN: bankroll paths -> figures/bankroll_paths.png"),
     "e5": (e5, "memory error bars -> figures/memory_error_bars.png"),
     "e6": (e6, "drawdown by H -> figures/drawdown_by_hurst.png"),
     "e7": (e7, "interval honesty -> figures/interval_honesty.png  (~4 min)"),

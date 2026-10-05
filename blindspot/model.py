@@ -1,9 +1,10 @@
 """Market models and simulation methods used by every experiment.
 
-The project compares ways to estimate the price and effect of crash insurance.
-The hedge is a test case; the main subject is whether each simulation method
-reports a reliable result. Keeping the shared model here prevents experiments
-from silently using different assumptions.
+The project studies what a rolling crash hedge does to a compounding bankroll:
+its effect on average growth, on individual paths, and on the worst drawdowns
+(experiment E4). Side experiments test whether each simulation method and its
+error bar report a reliable result. Keeping the shared model here prevents
+experiments from silently using different assumptions.
 
 This module contains:
 

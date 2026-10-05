@@ -1,35 +1,79 @@
 # The Ergodic Blindspot
 
-This project asks a practical question: **how much can we trust a simulated
-price for crash insurance when crashes are rare, market volatility has memory,
-and an investor experiences only one path through time?**
+A simulation study of crash insurance for a compounding bankroll. Each month
+the bankroll spends a small, fixed share of its wealth on a far
+out-of-the-money put. The question is what that hedge actually does over ten
+years. It looks at three things: the average outcome, what happens on a
+typical path, and the worst drawdowns.
 
-It compares ordinary Monte Carlo simulation with methods that deliberately
-reduce simulation noise. It then checks whether an accurately priced hedge
-actually helps a bankroll over many months.
+The title refers to the gap between those views. A simulation averages over
+many possible histories, but an investor lives through only one, with gains
+and losses compounding along the way.
 
-The title refers to a simple gap:
+## Main finding (experiment E4)
 
-- A simulation averages many possible market histories.
-- A real investor lives through one history, with gains and losses compounding
-  along the way.
+**The hedge greatly reduces the worst drawdowns and raises the average
+long-run growth. The cost is a premium paid on every path, so on most
+individual paths the hedged bankroll ends slightly behind.**
 
-Those two views can tell different stories. An estimator can be correct on
-average even though most affordable runs report zero. A hedge can improve the
-average result while losing money on most individual paths. Dependence between
-months can also make the usual error bars much too small.
+400,000 ten-year paths are simulated. The hedged and unhedged bankrolls see
+exactly the same market month by month, so every difference comes from the
+hedge.
 
-## What the project finds
+| result after 120 months | unhedged | hedged |
+|---|---:|---:|
+| 1-in-1,000 worst drawdown | **99.96%** of wealth | **75.5%** |
+| 1-in-100 worst drawdown | 98.3% | 65.0% |
+| mean terminal log wealth | +0.600 | **+0.702** |
+| median terminal log wealth | +0.714 | +0.704 |
+| 5th-percentile terminal log wealth | −0.70 | −0.22 |
+| median drawdown | 31.7% | 31.7% |
 
-- Rare crashes make ordinary Monte Carlo estimates very uneven. The average
-  across many runs can be right even when the typical run misses every crash.
-- Smarter sampling can estimate the price of a put with much less noise.
-- Better pricing does not make the hedge profitable. In the main scenario, the
-  hedge usually loses its monthly premium but softens the worst drawdowns.
-- When volatility remains high or low for long stretches, formulas that assume
-  independent months understate uncertainty.
-- Giving volatility a finite memory lets the model show short-run persistence
-  without assuming that the same pattern lasts forever.
+- **Worst cases.** On the worst 0.1% of paths, a near-total wipeout becomes
+  a 75% loss. At the median, drawdowns are unchanged.
+- **Averages.** Mean log wealth rises by **+0.102 ± 0.001** over ten years,
+  which is +0.00085 per month of geometric growth. This matches the
+  numerical-integration benchmark.
+- **Cost.** The 0.05% monthly premium is paid on every path. On the ~89% of
+  paths with no crash, it costs exactly −0.060 in log wealth. The hedge ends
+  ahead on only **7.1%** of paths, the ones where a put pays out.
+
+![E4: bankroll paths](figures/bankroll_paths.png)
+
+> **Pricing caveat.** E4 prices the put at its fair expected payoff. In E4's
+> market, the average gain survives until the put costs about 11× its fair
+> value. Side experiment E8 uses a milder crash model and a 3× risk premium.
+> There the average gain turns negative and the drawdown benefit shrinks to a
+> few percentage points. See the [documentation](docs/documentation.md#e8--rolling-hedge-with-a-risk-premium-and-volatility-memory).
+
+## Side experiments
+
+These check whether the numbers above, and their error bars, can be trusted.
+They are described in full in the [documentation](docs/documentation.md).
+
+| | question | short answer |
+|---|---|---|
+| E1 | Can one Monte Carlo run price a rare payoff? | Correct on average, but the median run reports zero below ~1,100 samples. |
+| E2 | Where does the simulation noise come from? | From crashes in the unhedged return; the hedge removes them. The noise-reduction methods only help when combined (163×). |
+| E3 | How many samples to tell if the hedge helps growth? | ~14,000 with plain Monte Carlo; 73 with both methods. |
+| E5 | Do error bars survive volatility memory? | With persistent volatility they understate uncertainty by up to 3.5×. |
+| E6 | Does path roughness change extreme drawdowns? | Yes: the 1-in-1,000 drawdown varies from 38% to 55% at the same variance. |
+| E7 | Are drawdown confidence intervals honest? | It depends strongly on H and the sampling design; coverage ranges from 0% to 100%. |
+| E8 | What if the put carries a risk premium and volatility has memory? | The average turns negative; the tail benefit becomes small. |
+
+Supporting evidence from S&P 500 data (1990–2026): the direction of returns
+shows no memory, while volatility shows strong memory. See
+[memory_evidence.md](docs/memory_evidence.md).
+
+## Quick start
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m blindspot.experiments e4     # main finding
+.venv/bin/python -m blindspot.experiments all    # every experiment
+.venv/bin/python -m tests.test_regressions       # numerical checks
+```
 
 ## Project map
 
@@ -37,178 +81,9 @@ months can also make the usual error bars much too small.
 blindspot/   market model, simulation methods, and experiments
 tests/       numerical checks and guards against known mistakes
 figures/     charts produced by the experiments
-docs/        background and interpretation
+docs/        documentation and background evidence
 data/        downloadable market data cache
 ```
 
-Run the main comparison with:
-
-```bash
-.venv/bin/python -m blindspot.experiments e8
-```
-
-## Main experiment: E8
-
-E8 puts the earlier experiments together in one model:
-
-- Normal monthly moves are mixed with occasional large losses, creating a
-  much heavier left tail than a normal distribution has.
-- Volatility can be rough, memoryless, or persistent within a 64-month market
-  regime. The setting is summarized by the **Hurst exponent** `H`: values below
-  `0.5` reverse direction quickly, `0.5` has no memory, and values above `0.5`
-  tend to persist.
-- The volatility signal is generated with fractional Gaussian noise (`fGn`),
-  a standard model for this kind of dependence.
-- After 64 months the signal resets. This means volatility can have local
-  memory without that memory lasting forever.
-- One scenario alternates rough (`H = 0.1`) and persistent (`H = 0.8`) regimes.
-- The pricing model, called `Q`, assumes a 0.3% monthly crash chance. The model
-  used for actual bankroll paths, called `P`, assumes 0.1%. This difference is
-  the extra price investors pay for crash protection.
-- Each month, the strategy spends 0.1% of its wealth on a put that pays when
-  the market falls more than 30%.
-
-Monthly log returns follow:
-
-```text
-r_t = drift(sigma_t, measure) + sigma_t Z_t - I_t E_t,
-sigma_t = 0.05 exp(0.65 G_t),
-E_t ~ Exponential(mean 0.60).
-```
-
-In plain English, the return is a normal market move plus an occasional
-downward jump. The size of ordinary moves changes with the current volatility
-signal. The drift is adjusted so that expected growth stays at the chosen
-level under both `P` and `Q`.
-
-### Comparing the pricing methods fairly
-
-Each pricing run gets the same budget: 16,384 simulated months. Every method
-tries to recover the same benchmark price, calculated with deterministic
-numerical integration:
-
-```text
-Q put price = 0.00063126 per unit of the index
-```
-
-The four methods are:
-
-1. **Ordinary Monte Carlo:** simulate months normally and average the put
-   payoffs.
-2. **Crash control:** use the known crash probability to remove some random
-   noise from the estimate.
-3. **Crash oversampling:** simulate crashes more often—20% instead of 0.3%—and
-   reweight every result so the estimate still represents the original model.
-   This is usually called *importance sampling*.
-4. **Both methods together:** combine the crash control with oversampling.
-
-Across rough, memoryless, persistent, and alternating regimes, the reduction
-in variance is approximately:
-
-| method | improvement over ordinary Monte Carlo |
-|---|---:|
-| crash control | 1.4–1.6× |
-| crash oversampling | 4.3–5.5× |
-| both methods | 4.4–5.6× |
-
-All four methods recover the benchmark price within normal simulation error.
-The lower-variance methods simply need fewer runs to reach the same precision.
-
-That pricing improvement does not change the economics of the hedge. Because
-`Q` assumes a higher crash probability than `P`, the hedge loses
-about `0.0004` in average log growth per month and beats the unhedged bankroll
-on only about 7% of 10-year paths. Its benefit appears in the worst outcomes:
-it reduces the 99th-percentile maximum drawdown by about 2–4 percentage points,
-depending on the volatility regime.
-
-![Main experiment](figures/unified_comparison.png)
-
-## Why long-run H returns to 0.5
-
-A process with one fixed Hurst exponent cannot behave as if `H != 0.5` over
-short periods and `H = 0.5` over very long periods. E8 handles this by joining
-independent regimes of a fixed length.
-
-For a regime length `B`, a time span `n = qB + r`, and a local Hurst exponent
-`H`, the variance of the accumulated volatility signal is:
-
-```text
-Var(sum G_t) = q B^(2H) + r^(2H).
-```
-
-Within one regime, variance grows like `n^(2H)`. Across many independent
-regimes, it grows in direct proportion to `n`, which is the long-run behavior
-of `H = 0.5`. Test T12 checks this for every regime used by E8.
-
-## Setup and commands
-
-```bash
-python -m venv .venv
-.venv/bin/pip install -r requirements.txt
-
-# Check the core model and its benchmark values.
-.venv/bin/python -m blindspot.model
-
-# Run the main experiment and create its chart.
-.venv/bin/python -m blindspot.experiments e8
-
-# Run every experiment without creating charts.
-.venv/bin/python -m blindspot.experiments all --no-plots
-
-# Run the numerical and regression checks.
-.venv/bin/python -m tests.test_regressions
-
-# Estimate volatility memory from S&P 500 data.
-# This downloads ^GSPC the first time it runs.
-.venv/bin/python -m blindspot.sp500_memory
-
-# Demonstrate the memory estimators with synthetic data.
-.venv/bin/python -m blindspot.memory
-```
-
-The experiments use fixed random seeds, so results can be reproduced. E8 uses
-seeds 8080–8083 for pricing and 8180–8183 for bankroll paths. The test suite
-contains 17 checks of expected numerical behavior and eight guards against bugs
-found during development.
-
-E5 keeps the conditional mean of simple returns constant, while its log
-returns inherit volatility memory through variance drag. Its diagnostics
-report log-return correlations at lags 1 and 100 alongside their theoretical
-values.
-
-E7 retains every run's estimate and reported interval, then measures how often
-those intervals contain the simulated daily-grid benchmark. The chart shows
-95% Wilson bounds for that coverage rate. Benchmark simulation uncertainty is
-excluded. The separate half-width/(1.96 × RMSE) ratio compares scales and does
-not establish 95% interval coverage.
-
-## Files
-
-| path | what it contains |
-|---|---|
-| `blindspot/model.py` | market models, benchmark prices, simulators, and estimators |
-| `blindspot/experiments.py` | command-line runner for experiments E1–E8 and their charts |
-| `blindspot/memory.py` | methods for estimating the Hurst exponent |
-| `blindspot/sp500_memory.py` | memory estimates from S&P 500 data |
-| `blindspot/stable_tail.py` | corrected reference code from an earlier model |
-| `tests/test_regressions.py` | numerical checks T1–T17 and bug guards B1–B8 |
-| `docs/memory_evidence.md` | evidence for putting memory in volatility |
-| `figures/` | generated charts |
-| `data/` | downloaded data that can be recreated |
-
-## What the results do not prove
-
-- E8 compares estimation methods; it is not a trading strategy fitted to real
-  market prices.
-- The return model creates rare, strongly negative outcomes, but it does not
-  claim that real crashes follow a specific Pareto-style power law.
-- The crash probabilities, 64-month reset, jump size, strike, and monthly spend
-  are scenario choices. They should be varied before drawing financial
-  conclusions.
-- Memory is introduced through volatility in E5 and E8. Their log returns
-  inherit dependence through volatility-dependent drift. E6–E7 use a separate
-  fBm bankroll family to stress-test drawdown estimators.
-- Real market regimes do not necessarily end on an exact 64-month schedule;
-  the reset is a clear way to model finite memory.
-- Estimates of extreme drawdowns need their own uncertainty ranges before they
-  should be used as real risk limits.
+Full documentation covers the model, every experiment, commands and
+limitations: **[docs/documentation.md](docs/documentation.md)**.
