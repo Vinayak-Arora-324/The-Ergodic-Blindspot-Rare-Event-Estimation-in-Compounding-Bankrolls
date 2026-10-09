@@ -14,8 +14,9 @@ gives the main finding only.
 
 ## 1. The question
 
-A bankroll compounds. It can buy cheap, far out-of-the-money crash insurance
-every month. What does that do to the outcome:
+A bankroll compounds. Every month it follows one fixed, mechanical rule: buy
+the same small amount of cheap, far out-of-the-money crash insurance and hold
+it to expiry. What does that do to the outcome:
 
 - on average across many possible histories,
 - along the single history an investor actually lives through,
@@ -29,6 +30,30 @@ cannot be computed from a one-month average at all.
 E4 answers the question directly and is the project's main result. The side
 experiments test how far simulated estimates of these quantities, and their
 error bars, can be trusted.
+
+### A naive hedge, on purpose
+
+The hedge is deliberately as simple as possible. It is a toy for separating
+averages from individual paths and for testing simulation methods, not a
+trading strategy:
+
+- **No timing or market view.** It buys the same option every month whatever
+  the market is doing.
+- **No sizing rule.** The spend is a fixed fraction of wealth, not optimised
+  for growth or risk.
+- **No active management.** Options are held to expiry. Nothing is sold early,
+  rolled on a spike, or monetised after a selloff.
+- **No volatility spikes.** E1–E4 use constant volatility. E5 and E8 let
+  volatility vary smoothly with memory, but it never jumps suddenly and
+  option prices never spike. Real tail-hedging programmes earn much of their return by
+  selling options when implied volatility jumps, which this model cannot
+  represent.
+- **Simple pricing.** The put costs its fair expected payoff (E1–E4) or a
+  fixed multiple of a crash rate (E8). There is no implied-volatility surface
+  or skew.
+
+The results therefore describe this rule in this model only. They say nothing
+about how a real, actively managed tail hedge would perform.
 
 ---
 
@@ -51,9 +76,9 @@ r = m + S Z − E          with probability λ,      Z ~ N(0,1), E ~ Exponential
 | `S` | 0.05 | volatility of ordinary months |
 | `μ` (`MU`) | 0.005 | expected monthly log return; `m = μ + λβ` keeps it exact |
 
-### Hedge
+### Hedge (deliberately naive)
 
-Each month the strategy puts a fraction `C = 0.0005` (0.05%) of wealth into a
+Each month, with no conditions, the rule puts a fraction `C = 0.0005` (0.05%) of wealth into a
 one-month put struck 50% below the current level (`K = 50`, `S0 = 100`). The
 rest stays in the index. The hedged log growth for a month with return `r` is
 
@@ -138,9 +163,10 @@ All three statements hold at the same time, and none should be dropped:
 
 The average gain (+0.10) is small next to the normal spread between paths
 (sd 0.56), with a ratio of 0.18. One ten-year history cannot reveal whether the
-hedge "worked." The case for the hedge sits in the drawdown table, which a
-one-month integral cannot compute because drawdown depends on the order of
-returns.
+hedge "worked." Even for this naive rule, the main effect is in the drawdown
+table, which a one-month integral cannot compute because drawdown depends on
+the order of returns. None of this is a claim about real tail-hedging
+strategies (see [A naive hedge, on purpose](#a-naive-hedge-on-purpose)).
 
 ### Sensitivity to price
 
@@ -261,7 +287,7 @@ Wilson bounds for that coverage rate, and benchmark uncertainty is excluded.
 The separate ratio half-width/(1.96 × RMSE) compares scales; it does not
 establish 95% coverage.
 
-### E8 – Rolling hedge with a risk premium and volatility memory
+### E8 – Naive rolling hedge with a risk premium and volatility memory
 
 *Figure: `figures/unified_comparison.png`*
 
@@ -277,7 +303,10 @@ E8 combines the earlier ingredients:
 - The pricing model `Q` assumes a 0.3% monthly crash chance. The bankroll
   paths use `P` with 0.1%. The put therefore costs 3× its fair value under
   `P`.
-- Each month the strategy spends 0.1% of wealth on a put that pays below −30%.
+- Each month the same naive rule spends 0.1% of wealth on a one-month put
+  that pays below −30% and holds it to expiry.
+- Volatility varies smoothly with memory but has no sudden spikes, and the
+  hedge never gains from a rise in option prices before expiry.
 
 ```text
 r_t = drift(σ_t, measure) + σ_t Z_t − I_t E_t,   E_t ~ Exponential(mean 0.60)
@@ -307,7 +336,7 @@ The 99.9% column was produced by re-running E8's bankroll stage with the same
 seeds; `e8` itself prints only the 99th percentile. With a 3× premium and
 milder crashes, the average gain turns negative, and even the 1-in-1,000
 drawdown improves by only 2–5 points. Better pricing methods reduce
-estimation noise but do not change the economics of the hedge.
+estimation noise but do not change the economics of this naive hedge.
 
 **Why the long-run H returns to 0.5.** A process with one fixed Hurst exponent
 cannot have H ≠ 0.5 over short periods and H = 0.5 over long ones. E8 handles
@@ -386,6 +415,13 @@ others take seconds.
 
 ## 6. What the results do not prove
 
+- **The hedge is naive.** It is a fixed monthly rule with no timing, sizing,
+  early exit or monetisation of volatility spikes. The results do not describe
+  real tail-hedging strategies, which are actively managed.
+- **There are no volatility spikes.** Volatility is constant (E1–E4) or varies
+  smoothly (E5, E8). Sudden jumps in volatility and in option prices, which
+  are common in real markets and drive much of the value of real tail hedges,
+  are not modelled.
 - **E4 prices the put fairly.** Real crash insurance carries a risk premium.
   E4's average gain survives up to ~11× fair value in its own market, but E8
   shows that with milder crashes a 3× premium is enough to make it negative.

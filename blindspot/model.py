@@ -1,10 +1,11 @@
 """Market models and simulation methods used by every experiment.
 
-The project studies what a rolling crash hedge does to a compounding bankroll:
-its effect on average growth, on individual paths, and on the worst drawdowns
-(experiment E4). Side experiments test whether each simulation method and its
-error bar report a reliable result. Keeping the shared model here prevents
-experiments from silently using different assumptions.
+The project studies what a deliberately naive, mechanical crash hedge does to
+a compounding bankroll: its effect on average growth, on individual paths, and
+on the worst drawdowns (experiment E4). Side experiments test whether each
+simulation method and its error bar report a reliable result. Keeping the
+shared model here prevents experiments from silently using different
+assumptions.
 
 This module contains:
 
@@ -145,7 +146,8 @@ def sample_returns(rng, n, lam=LAM, return_jumps=False):
 # 3. Hedge
 # ---------------------------------------------------------------------------
 # Roll a deep out-of-the-money put every month.  Each month a wealth fraction C
-# buys puts and 1 - C stays in the index.
+# buys puts and 1 - C stays in the index.  Deliberately naive: fixed spend,
+# fixed strike, held to expiry, no timing and no early exit.
 S0 = 100.0      # index level at the start of each month
 K = 50.0        # strike: 50% OTM, so only a genuine crash pays
 C = 0.0005      # premium spend as a fraction of wealth

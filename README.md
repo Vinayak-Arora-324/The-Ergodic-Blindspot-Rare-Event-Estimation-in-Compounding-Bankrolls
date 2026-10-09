@@ -1,26 +1,36 @@
 # The Ergodic Blindspot
 
-A simulation study of crash insurance for a compounding bankroll. Each month
-the bankroll spends a small, fixed share of its wealth on a far
-out-of-the-money put. The question is what that hedge actually does over ten
-years. It looks at three things: the average outcome, what happens on a
-typical path, and the worst drawdowns.
+A simulation study of a **deliberately naive tail hedge** on a compounding
+bankroll. Every month, regardless of market conditions, the bankroll spends
+the same small share of its wealth on a one-month put far below the market and
+holds it to expiry. Over ten years, the study asks what this mechanical rule
+does to three things: the average outcome, the typical path, and the worst
+drawdowns.
 
 The title refers to the gap between those views. A simulation averages over
 many possible histories, but an investor lives through only one, with gains
 and losses compounding along the way.
 
+> **This is not a trading strategy.** The hedge has no timing, no sizing rule,
+> no market view and no exit logic. It never takes profits early. The market
+> model has **no volatility spikes**, so the hedge can never profit from a
+> jump in option prices. It is a toy example for separating averages from
+> individual paths and for testing simulation methods. Its results say
+> nothing about how a real, actively managed tail-hedging programme would
+> perform.
+
 ## Main finding (experiment E4)
 
-**The hedge greatly reduces the worst drawdowns and raises the average
-long-run growth. The cost is a premium paid on every path, so on most
+**Even this naive hedge greatly reduces the worst drawdowns and raises
+average long-run growth. The cost is a premium paid on every path, so on most
 individual paths the hedged bankroll ends slightly behind.**
 
-400,000 ten-year paths are simulated. The hedged and unhedged bankrolls see
-exactly the same market month by month, so every difference comes from the
-hedge.
+The rule is the same every month: spend 0.05% of wealth on a one-month put
+50% below the market, priced at its fair expected payoff. 400,000 ten-year
+paths are simulated. The hedged and unhedged bankrolls see exactly the same
+market month by month, so every difference comes from the hedge.
 
-| result after 120 months | unhedged | hedged |
+| result after 120 months | unhedged | naive hedge |
 |---|---:|---:|
 | 1-in-1,000 worst drawdown | **99.96%** of wealth | **75.5%** |
 | 1-in-100 worst drawdown | 98.3% | 65.0% |
@@ -34,17 +44,17 @@ hedge.
 - **Averages.** Mean log wealth rises by **+0.102 ± 0.001** over ten years,
   which is +0.00085 per month of geometric growth. This matches the
   numerical-integration benchmark.
-- **Cost.** The 0.05% monthly premium is paid on every path. On the ~89% of
-  paths with no crash, it costs exactly −0.060 in log wealth. The hedge ends
-  ahead on only **7.1%** of paths, the ones where a put pays out.
+- **Cost.** The premium is paid on every path. On the ~89% of paths with no
+  crash, it costs exactly −0.060 in log wealth. The hedge ends ahead on only
+  **7.1%** of paths, the ones where a put pays out.
 
 ![E4: bankroll paths](figures/bankroll_paths.png)
 
 > **Pricing caveat.** E4 prices the put at its fair expected payoff. In E4's
 > market, the average gain survives until the put costs about 11× its fair
 > value. Side experiment E8 uses a milder crash model and a 3× risk premium.
-> There the average gain turns negative and the drawdown benefit shrinks to a
-> few percentage points. See the [documentation](docs/documentation.md#e8--rolling-hedge-with-a-risk-premium-and-volatility-memory).
+> There the same naive hedge's average gain turns negative and the drawdown
+> benefit shrinks to a few percentage points. See the [documentation](docs/documentation.md#e8--naive-rolling-hedge-with-a-risk-premium-and-volatility-memory).
 
 ## Side experiments
 
@@ -59,7 +69,7 @@ They are described in full in the [documentation](docs/documentation.md).
 | E5 | Do error bars survive volatility memory? | With persistent volatility they understate uncertainty by up to 3.5×. |
 | E6 | Does path roughness change extreme drawdowns? | Yes: the 1-in-1,000 drawdown varies from 38% to 55% at the same variance. |
 | E7 | Are drawdown confidence intervals honest? | It depends strongly on H and the sampling design; coverage ranges from 0% to 100%. |
-| E8 | What if the put carries a risk premium and volatility has memory? | The average turns negative; the tail benefit becomes small. |
+| E8 | What if the put carries a risk premium and volatility has memory? | The naive hedge's average turns negative; the tail benefit becomes small. |
 
 Supporting evidence from S&P 500 data (1990–2026): the direction of returns
 shows no memory, while volatility shows strong memory. See

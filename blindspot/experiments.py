@@ -6,10 +6,13 @@
     python -m blindspot.experiments all --no-plots
 
 E4 is the main experiment: it follows hedged and unhedged bankrolls along
-400,000 ten-year paths and shows that the rolling crash hedge greatly reduces
-the worst drawdowns and raises average log growth, while paying its premium on
-every path. The other experiments are side experiments that test how far the
-simulated numbers and their error bars can be trusted. See docs/documentation.md.
+400,000 ten-year paths and shows that a deliberately naive rolling crash hedge
+(fixed monthly spend, fixed strike, held to expiry, no timing, no volatility
+spikes in the model) greatly reduces the worst drawdowns and raises average
+log growth, while paying its premium on every path. It is a toy rule, not a
+trading strategy. The other experiments are side experiments that test how far
+the simulated numbers and their error bars can be trusted. See
+docs/documentation.md.
 
   E1  rare payoffs          -- most small runs miss the event, even though the
                                average across many runs is correct.
